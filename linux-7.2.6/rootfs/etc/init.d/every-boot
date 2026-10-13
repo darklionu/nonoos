@@ -1,0 +1,134 @@
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          every-boot
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Exécute des actions à chaque démarrage
+# Description:       Script de maintenance exécuté à chaque démarrage du système.
+### END INIT INFO
+
+set -u
+set -o pipefail
+
+LOG_FILE="${LOG_FILE:-/var/log/every-boot.log}"
+NTPSERVER="${NTPSERVER:-time.google.com}"
+TIMEZONE="${NEWDISTRIB_TIMEZONE:-${TIMEZONE:-Europe/Paris}}"
+ZONEINFO_DIR="${ZONEINFO_DIR:-/usr/share/zoneinfo}"
+ETC_TIMEZONE_FILE="${ETC_TIMEZONE_FILE:-/etc/timezone}"
+ETC_LOCALTIME_FILE="${ETC_LOCALTIME_FILE:-/etc/localtime}"
+
+if ! mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null; then
+    echo "Impossible de créer le dossier du journal : $(dirname "$LOG_FILE")" >&2
+    exit 1
+fi
+
+log() {
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
+}
+
+cleanup_tmp() {
+    if [ -d /tmp ]; then
+        if find /tmp -type f -mtime +7 -delete 2>/dev/null; then
+            log "Nettoyage de /tmp terminé"
+        else
+            log "Nettoyage de /tmp terminé avec avertissements (certains fichiers ignorés)"
+        fi
+    else
+        log "/tmp introuvable, nettoyage ignoré"
+    fi
+}
+
+sync_time() {
+    if command -v ntpdate >/dev/null 2>&1; then
+        if ntpdate -s "$NTPSERVER" >>"$LOG_FILE" 2>&1; then
+            log "Synchronisation NTP réussie via $NTPSERVER"
+            return 0
+        fi
+        log "Échec de synchronisation NTP via ntpdate"
+        return 1
+    fi
+
+    if command -v timedatectl >/dev/null 2>&1; then
+        if timedatectl set-ntp true >/dev/null 2>&1; then
+            log "Service NTP activé via timedatectl"
+            return 0
+        fi
+        log "Impossible d'activer le service NTP via timedatectl"
+    fi
+
+    log "Aucun outil de synchronisation NTP disponible"
+    return 1
+}
+
+setup_timezone() {
+    if [ -z "$TIMEZONE" ]; then
+        log "Timezone vide, aucune modification appliquée"
+        return 0
+    fi
+
+    local zoneinfo_path="${ZONEINFO_DIR%/}/$TIMEZONE"
+
+    if [ -e "$zoneinfo_path" ]; then
+        log "Timezone valide détectée : $TIMEZONE"
+    else
+        log "Timezone inconnue : $TIMEZONE ; aucune modification appliquée"
+        return 0
+    fi
+
+    if [ -f "$ETC_TIMEZONE_FILE" ]; then
+        current_tz="$(tr -d '\r\n' < "$ETC_TIMEZONE_FILE" 2>/dev/null || true)"
+        if [ "$current_tz" != "$TIMEZONE" ]; then
+            printf '%s\n' "$TIMEZONE" > "$ETC_TIMEZONE_FILE"
+            log "/etc/timezone mis à jour : $TIMEZONE"
+        else
+            log "/etc/timezone déjà configuré : $TIMEZONE"
+        fi
+    else
+        printf '%s\n' "$TIMEZONE" > "$ETC_TIMEZONE_FILE"
+        log "/etc/timezone créé : $TIMEZONE"
+    fi
+
+    if [ -e "$ETC_LOCALTIME_FILE" ] && [ ! -L "$ETC_LOCALTIME_FILE" ]; then
+        rm -f -- "$ETC_LOCALTIME_FILE"
+    fi
+
+    if ln -sf -- "$zoneinfo_path" "$ETC_LOCALTIME_FILE" 2>>"$LOG_FILE"; then
+        log "/etc/localtime lié vers $TIMEZONE"
+    else
+        log "Impossible de lier /etc/localtime vers $TIMEZONE"
+    fi
+
+    export TZ="$TIMEZONE"
+    log "Timezone active : $TIMEZONE"
+}
+
+case "${1:-}" in
+    start)
+        log "Démarrage du hook every-boot"
+        setup_timezone
+        sync_time || true
+        cleanup_tmp
+        log "Hook every-boot terminé"
+        ;;
+
+    stop)
+        log "Arrêt : hook terminé"
+        ;;
+
+    restart|reload|force-reload)
+        "$0" start
+        ;;
+
+    status)
+        echo "every-boot est actif"
+        ;;
+
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+ esac
+
+exit 0

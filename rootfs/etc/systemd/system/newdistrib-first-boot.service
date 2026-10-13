@@ -1,0 +1,21 @@
+[Unit]
+Description=Configuration initiale de nonoos
+Wants=network-online.target
+After=network-online.target
+Before=display-manager.service
+ConditionPathExists=!/var/lib/newdistrib/first-boot-done
+
+[Service]
+Type=oneshot
+ExecStart=/etc/init.d/first-boot
+RemainAfterExit=yes
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=multi-user.target
