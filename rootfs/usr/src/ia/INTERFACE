@@ -1,0 +1,84 @@
+#include "Chatbot.h"
+
+#include <QApplication>
+#include <QFutureWatcher>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QVBoxLayout>
+#include <QWidget>
+
+#include <exception>
+
+int main(int argc, char *argv[]) {
+    QApplication app(argc, argv);
+
+    QWidget window;
+    window.setWindowTitle("ChatIA");
+
+    auto *layout = new QVBoxLayout(&window);
+    auto *history = new QPlainTextEdit;
+    auto *input = new QLineEdit;
+    auto *send = new QPushButton("Envoyer");
+    auto *typing = new QLabel("ChatIA est en train d'écrire…");
+    QFutureWatcher<QString> replyWatcher(&window);
+
+    history->setReadOnly(true);
+    input->setPlaceholderText("Écris ton message…");
+    typing->setStyleSheet("color:#888; font-style:italic;");
+    typing->hide();
+
+    layout->addWidget(history);
+    layout->addWidget(typing);
+    layout->addWidget(input);
+    layout->addWidget(send);
+
+    auto setBusy = [&](bool busy) {
+        typing->setVisible(busy);
+    };
+
+    QObject::connect(&replyWatcher, &QFutureWatcher<QString>::finished, &window,
+                     [&]() {
+                         try {
+                             history->appendPlainText(
+                                 QStringLiteral("ChatIA : ") + replyWatcher.result());
+                         } catch (const std::exception& error) {
+                             history->appendPlainText(
+                                 QStringLiteral("ChatIA : Une erreur est survenue : ") +
+                                 QString::fromLocal8Bit(error.what()));
+                         }
+                         input->setEnabled(true);
+                         send->setEnabled(true);
+                         setBusy(false);
+                         input->setFocus();
+                     });
+
+    auto sendMessage = [&]() {
+        const QString message = input->text().trimmed();
+        if (message.isEmpty()) {
+            return;
+        }
+
+        history->appendPlainText(QStringLiteral("Vous : ") + message);
+        input->clear();
+        input->setEnabled(false);
+        send->setEnabled(false);
+        setBusy(true);
+
+        replyWatcher.setFuture(QtConcurrent::run([message]() {
+            chatia::Chatbot chatbot;
+            return QString::fromStdString(
+                chatbot.generateReply(message.toStdString()));
+        }));
+    };
+
+    QObject::connect(send, &QPushButton::clicked, &window, [&]() { sendMessage(); });
+    QObject::connect(input, &QLineEdit::returnPressed, &window, sendMessage);
+
+    window.resize(500, 600);
+    window.show();
+
+    return app.exec();
+}

@@ -17,6 +17,7 @@
 STATE_DIR=/var/lib/newdistrib
 SUDOERS_DIR=${SUDOERS_DIR:-/etc/sudoers.d}
 MARKER="$STATE_DIR/first-boot-done"
+SETUP_READY_MARKER="$STATE_DIR/setup-ready"
 PROFILE_FILE="$STATE_DIR/profile"
 LOCALE_FILE=/etc/default/locale
 KEYBOARD_FILE=/etc/default/keyboard
@@ -31,6 +32,9 @@ PROFILES="office"
 SSH_ENABLED="no"
 BLUETOOTH_ENABLED="no"
 INSTALL_STATUS=""
+FIRST_BOOT_FAILURES=""
+FIRST_BOOT_FAILED=no
+PACKAGE_FAILED=no
 UI=text        # gui | whiptail | text
 
 # ---------------------------------------------------------------------------
@@ -39,6 +43,16 @@ UI=text        # gui | whiptail | text
 
 log() {
     printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG_FILE"
+}
+
+record_failure() {
+    local message="$1"
+    log "ERREUR : $message"
+    if [ -n "$FIRST_BOOT_FAILURES" ]; then
+        FIRST_BOOT_FAILURES+=$'\n'
+    fi
+    FIRST_BOOT_FAILURES+="- $message"
+    FIRST_BOOT_FAILED=yes
 }
 
 has_whiptail() {
@@ -151,7 +165,7 @@ _gui_checklist() {
     zenity --list --checklist --title="$title" --text="$(printf '%b' "$text")" \
         --column="" --column="Code" --column="Environnement" \
         --hide-column=2 --print-column=2 --separator=" " \
-        --width=460 --height=340 "$@" 2>/dev/null
+        --width=480 --height=440 "$@" 2>/dev/null
 }
 
 _wt_checklist() {
@@ -338,7 +352,7 @@ ui_welcome() {
                 anim_logo
                 printf '%b\n' "$welcome_text"
                 printf '\n'
-                anim_spinner "Détection du matériel" 2
+                anim_spinner "Préparation de l'assistant" 2
                 anim_progress "Préparation du système"
                 printf '\n'
                 cursor_show
@@ -351,148 +365,86 @@ ui_welcome() {
     esac
 }
 
-# ---------------------------------------------------------------------------
-# Listes de paquets (une par profil, modifiables dans $PKG_DIR)
-# Une ligne = un paquet. Les lignes vides et les # sont ignorés.
-# Les paquets introuvables dans les dépôts sont simplement ignorés.
-# ---------------------------------------------------------------------------
+# Détecte le matériel courant à partir de procfs, sysfs et des outils disponibles.
+detect_hardware() {
+    local cpu ram_kib ram_mib machine gpu disks networks usb_device usb_product usb_count usb_list
+    local device pci_device vendor pci_id
 
-create_default_lists() {
-    mkdir -p "$PKG_DIR"
+    cpu=$(awk -F: '/^model name[[:space:]]*:/ {sub(/^[[:space:]]+/, "", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null)
+    [ -n "$cpu" ] || cpu="Non détecté"
 
-    if [ ! -e "$PKG_DIR/office.list" ]; then
-        cat > "$PKG_DIR/office.list" <<'EOF'
-# Profil : Bureautique
-libreoffice
-firefox-esr
-firefox
-thunderbird
-evince
-gimp
-vlc
-keepassxc
-file-roller
-simple-scan
-system-config-printer
-EOF
+    ram_kib=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null)
+    if [[ "$ram_kib" =~ ^[0-9]+$ ]]; then
+        ram_mib=$((ram_kib / 1024))
+        ram_mib="$ram_mib Mio"
+    else
+        ram_mib="Non détectée"
     fi
 
-    if [ ! -e "$PKG_DIR/developing.list" ]; then
-        cat > "$PKG_DIR/developing.list" <<'EOF'
-# Profil : Développeur
-git
-build-essential
-libusb-1.0-0-dev
-cmake
-make
-gdb
-valgrind
-python3
-python3-pip
-python3-venv
-nodejs
-npm
-default-jdk
-golang
-rustc
-cargo
-docker.io
-docker-compose
-vim
-neovim
-tmux
-curl
-wget
-jq
-shellcheck
-sqlite3
-postgresql-client
-meld
-EOF
+    machine="Non détecté"
+    if [ -r /sys/class/dmi/id/product_name ]; then
+        IFS= read -r machine < /sys/class/dmi/id/product_name || machine="Non détecté"
+        [ -n "$machine" ] || machine="Non détecté"
     fi
 
-    if [ ! -e "$PKG_DIR/cybersec.list" ]; then
-        cat > "$PKG_DIR/cybersec.list" <<'EOF'
-# Profil : Cybersécurité
-nmap
-masscan
-wireshark
-tcpdump
-netcat-openbsd
-whois
-dnsutils
-traceroute
-john
-hashcat
-hydra
-aircrack-ng
-sqlmap
-nikto
-gobuster
-ettercap-text-only
-binwalk
-radare2
-foremost
-testdisk
-hexedit
-gdb
-lynis
-clamav
-openvpn
-wireguard
-tor
-proxychains4
-python3
-python3-pip
-git
-curl
-wget
-# Paquets disponibles uniquement sur Kali (ignorés ailleurs)
-metasploit-framework
-burpsuite
-EOF
+    if command -v lspci >/dev/null 2>&1; then
+        gpu=$(lspci 2>/dev/null | awk '/VGA compatible controller|3D controller|Display controller/ {sub(/^[^:]*: /, ""); print}' | head -n 3)
+    else
+        gpu=""
+        for device in /sys/class/drm/card[0-9]*; do
+            [ -e "$device" ] || continue
+            pci_device="${device##*/}"
+            if [ -r "$device/device/vendor" ] && [ -r "$device/device/device" ]; then
+                IFS= read -r vendor < "$device/device/vendor" || vendor="unknown"
+                IFS= read -r pci_id < "$device/device/device" || pci_id="unknown"
+                gpu="${gpu}${gpu:+; }${pci_device} (PCI ${vendor}:${pci_id})"
+            fi
+        done
     fi
-    if [ ! -e "$PKG_DIR/vieprivee.list" ]; then
-        cat > "$PKG_DIR/vieprivee.list" <<'EOF'
-# Profil : Vie privée
-tor
-torsocks
-privoxy
-gnupg
-keepassxc
-openssl
-curl
-wget
-ufw
-wireguard
-openvpn
-EOF
-    fi
+    [ -n "$gpu" ] || gpu="Aucun périphérique graphique détecté"
 
-    if [ ! -e "$PKG_DIR/serveur.list" ]; then
-        cat > "$PKG_DIR/serveur.list" <<'EOF'
-# Profil : Serveur
-git
-htop
-certbot
-ufw
-netdata
-docker.io
-ripgrep
-EOF
+    if command -v lsblk >/dev/null 2>&1; then
+        disks=$(lsblk -dn -o NAME,SIZE,TYPE 2>/dev/null | awk '$3 == "disk" && $1 !~ /boot[0-9]+$/ { print $1 " " $2 }')
+    else
+        disks=""
     fi
+    [ -n "$disks" ] || disks="Aucun disque détecté"
 
-    if [ ! -e "$PKG_DIR/graphical.list" ]; then
-        cat > "$PKG_DIR/graphical.list" <<'EOF'
-# Profil : Bureau KDE Plasma
-kde-plasma-desktop
-sddm
-plasma-nm
-dolphin
-konsole
-EOF
+    networks=""
+    for device in /sys/class/net/*; do
+        [ -e "$device/device" ] || continue
+        networks="${networks}${networks:+, }${device##*/}"
+    done
+    [ -n "$networks" ] || networks="Aucune interface détectée"
+
+    usb_count=0
+    usb_list=""
+    for usb_device in /sys/bus/usb/devices/*; do
+        [ -r "$usb_device/idVendor" ] || continue
+        usb_count=$((usb_count + 1))
+        if [ "$usb_count" -le 8 ]; then
+            usb_product=""
+            if [ -r "$usb_device/product" ]; then
+                IFS= read -r usb_product < "$usb_device/product" || usb_product=""
+            fi
+            usb_list="${usb_list}${usb_list:+, }${usb_product:-Périphérique USB}"
+        fi
+    done
+    if [ "$usb_count" -gt 8 ]; then
+        usb_list="${usb_list}, et $((usb_count - 8)) autre(s)"
     fi
+    [ -n "$usb_list" ] || usb_list="Aucun périphérique USB détecté"
+
+    HARDWARE_REPORT=$(printf 'Modèle : %s\nArchitecture : %s\nProcesseur : %s\nMémoire vive : %s\nGraphique : %s\nDisques : %s\nInterfaces réseau : %s\nUSB (%s) : %s' \
+        "$machine" "$(uname -m)" "$cpu" "$ram_mib" "$gpu" "$disks" "$networks" "$usb_count" "$usb_list")
+    log "Rapport matériel détecté : $(printf '%s' "$HARDWARE_REPORT" | tr '\n' ';')"
 }
+
+# ---------------------------------------------------------------------------
+# Les listes de paquets sont fournies dans $PKG_DIR et peuvent être modifiées
+# avant la construction de l'ISO. Une ligne = un paquet ; les lignes vides et
+# les commentaires commençant par # sont ignorés.
+# ---------------------------------------------------------------------------
 
 # Paquets de langue supplémentaires (profil bureautique uniquement)
 language_packages() {
@@ -547,12 +499,16 @@ ask_keyboard() {
 
 ask_profiles() {
     PROFILES=$(ui_checklist "$TITLE" \
-        "Choisissez votre/vos environnement(s)\n(plusieurs choix possibles)" \
+        "Choisissez un ou plusieurs profils d'applications" \
         "office"     "Bureautique"   ON \
         "developing" "Développeur"   OFF \
         "cybersec"   "Cybersécurité" OFF \
         "vieprivee"  "Vie privée"     OFF \
-        "serveur"    "Serveur"        OFF)
+        "serveur"    "Serveur"        OFF \
+        "multimedia" "Multimédia"     OFF \
+        "education"  "Éducation"      OFF \
+        "gaming"     "Jeux"           OFF \
+        "custom"     "Personnalisé (liste modifiable)" OFF)
     PROFILES=$(echo $PROFILES)          # nettoie espaces et retours à la ligne
 
     # Par défaut : bureautique
@@ -631,6 +587,10 @@ is_first_user_account() {
     [ "$user_count" -eq 0 ]
 }
 
+find_regular_user() {
+    getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 && $7 !~ /(nologin|false)$/ { print $1; exit }'
+}
+
 prompt_password_with_confirmation() {
     local prompt_text="$1"
     local pass1=""
@@ -703,33 +663,60 @@ create_user_account() {
 
     # L'outil useradd n'est pas toujours présent dans les images minimales.
     if ! command -v useradd >/dev/null 2>&1; then
-        apt-get install -y passwd >/dev/null 2>&1 || return 1
+        if ! apt-get install -y passwd >>"$LOG_FILE" 2>&1; then
+            log "Impossible d'installer le paquet passwd."
+            return 1
+        fi
     fi
 
     if id -u "$username" >/dev/null 2>&1; then
         log "Utilisateur $username déjà présent."
     else
-        useradd -m -s /bin/bash "$username"
+        if ! useradd -m -s /bin/bash "$username"; then
+            log "Impossible de créer le compte $username."
+            return 1
+        fi
         log "Compte utilisateur créé : $username"
     fi
 
     # Définition du mot de passe avec chpasswd, ce qui est plus fiable qu'un shell interactif.
     if [ -n "$pass" ]; then
-        printf '%s:%s\n' "$username" "$pass" | chpasswd
+        if ! printf '%s:%s\n' "$username" "$pass" | chpasswd; then
+            log "Impossible de définir le mot de passe du compte $username."
+            return 1
+        fi
     fi
 
     # Gestion des privilèges sudo
     if [ "$privileges" = "sudo" ]; then
         if ! command -v sudo >/dev/null 2>&1; then
-            apt-get install -y sudo >/dev/null 2>&1 || return 1
+            if ! apt-get install -y sudo >>"$LOG_FILE" 2>&1; then
+                log "Impossible d'installer le paquet sudo."
+                return 1
+            fi
         fi
         if ! getent group sudo >/dev/null; then
-            groupadd -f sudo
+            if ! groupadd -f sudo; then
+                log "Impossible de créer le groupe sudo."
+                return 1
+            fi
         fi
-        usermod -aG sudo "$username"
-        mkdir -p "$SUDOERS_DIR"
-        printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$username" > "$SUDOERS_DIR/newdistrib-user"
-        chmod 0440 "$SUDOERS_DIR/newdistrib-user"
+        if ! usermod -aG sudo "$username"; then
+            log "Impossible d'ajouter $username au groupe sudo."
+            return 1
+        fi
+        if ! mkdir -p "$SUDOERS_DIR"; then
+            log "Impossible de créer le dossier $SUDOERS_DIR."
+            return 1
+        fi
+        if ! printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$username" > "$SUDOERS_DIR/newdistrib-user"; then
+            log "Impossible d'écrire la règle sudo pour $username."
+            return 1
+        fi
+        if ! chmod 0440 "$SUDOERS_DIR/newdistrib-user"; then
+            log "Impossible de régler les permissions de la règle sudo."
+            return 1
+        fi
         log "Droits sudo accordés à $username"
     fi
 
@@ -751,14 +738,34 @@ enable_ssh_service() {
     fi
 
     if ! dpkg -s openssh-server >/dev/null 2>&1; then
-        apt-get install -y openssh-server >>"$LOG_FILE" 2>&1 || return 1
+        if ! apt-get install -y openssh-server >>"$LOG_FILE" 2>&1; then
+            log "SSH : installation de openssh-server échouée."
+            return 1
+        fi
     fi
 
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl enable ssh >/dev/null 2>&1 || true
-        systemctl restart ssh >/dev/null 2>&1 || true
+        if ! systemctl enable --now ssh >>"$LOG_FILE" 2>&1; then
+            log "SSH : impossible d'activer ou de démarrer le service."
+            return 1
+        fi
     elif command -v service >/dev/null 2>&1; then
-        service ssh restart >/dev/null 2>&1 || true
+        if command -v update-rc.d >/dev/null 2>&1; then
+            if ! update-rc.d ssh defaults >>"$LOG_FILE" 2>&1; then
+                log "SSH : impossible d'activer le service au démarrage."
+                return 1
+            fi
+        else
+            log "SSH : impossible de configurer le démarrage automatique."
+            return 1
+        fi
+        if ! service ssh restart >>"$LOG_FILE" 2>&1; then
+            log "SSH : impossible de démarrer le service."
+            return 1
+        fi
+    else
+        log "SSH : aucun gestionnaire de service disponible."
+        return 1
     fi
 
     log "SSH activé"
@@ -776,21 +783,83 @@ enable_bluetooth_service() {
         return 1
     fi
 
+    local package_found=no
     for pkg in bluez bluez-utils; do
-        if apt-cache show "$pkg" >/dev/null 2>&1; then
-            if ! dpkg -s "$pkg" >/dev/null 2>&1; then
-                apt-get install -y "$pkg" >>"$LOG_FILE" 2>&1 || return 1
+        if dpkg -s "$pkg" >/dev/null 2>&1; then
+            package_found=yes
+        elif apt-cache show "$pkg" >/dev/null 2>&1; then
+            package_found=yes
+            if ! apt-get install -y "$pkg" >>"$LOG_FILE" 2>&1; then
+                log "Bluetooth : installation de $pkg échouée."
+                return 1
             fi
         fi
     done
 
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl enable bluetooth >/dev/null 2>&1 || true
-        systemctl start bluetooth >/dev/null 2>&1 || true
-        rfkill unblock bluetooth >/dev/null 2>&1 || true
+    if [ "$package_found" != yes ]; then
+        log "Bluetooth : aucun paquet BlueZ disponible."
+        return 1
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        log "Bluetooth : systemctl indisponible, impossible d'activer le service."
+        return 1
+    fi
+    if ! systemctl enable --now bluetooth >>"$LOG_FILE" 2>&1; then
+        log "Bluetooth : impossible d'activer ou de démarrer le service."
+        return 1
+    fi
+    if command -v rfkill >/dev/null 2>&1 && ! rfkill unblock bluetooth >>"$LOG_FILE" 2>&1; then
+        log "Bluetooth : impossible de débloquer l'interface avec rfkill."
+        return 1
     fi
 
     log "Bluetooth activé"
+    return 0
+}
+
+is_server_profile_selected() {
+    case " $1 " in
+        *" serveur "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+profile_display_mode() {
+    if is_server_profile_selected "$1"; then
+        printf '%s' "Désactivée (mode console)"
+    else
+        printf '%s' "KDE Plasma"
+    fi
+}
+
+configure_server_mode() {
+    profiles="$1"
+    is_server_profile_selected "$profiles" || return 0
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        log "ERREUR : systemctl indisponible, impossible de configurer le mode serveur sans interface graphique."
+        return 1
+    fi
+
+    if ! systemctl set-default multi-user.target >>"$LOG_FILE" 2>&1; then
+        log "ERREUR : impossible de définir le démarrage en mode console."
+        return 1
+    fi
+
+    display_manager=$(systemctl show --property=Id --value display-manager.service 2>>"$LOG_FILE") || display_manager=""
+    if [ -n "$display_manager" ]; then
+        if ! systemctl disable "$display_manager" >>"$LOG_FILE" 2>&1; then
+            log "ERREUR : impossible de désactiver $display_manager."
+            return 1
+        fi
+        if ! systemctl stop "$display_manager" >>"$LOG_FILE" 2>&1; then
+            log "ERREUR : impossible d'arrêter $display_manager."
+            return 1
+        fi
+    fi
+
+    log "Mode serveur configuré : démarrage en console, interface graphique désactivée."
     return 0
 }
 
@@ -1031,7 +1100,6 @@ install_profiles() {
     PKG_TODO=""
     PKG_MISSING=""
 
-    create_default_lists
     export DEBIAN_FRONTEND=noninteractive
 
     if ! apt-get update >>"$LOG_FILE" 2>&1; then
@@ -1042,8 +1110,8 @@ install_profiles() {
     for p in $profiles; do
         list="$PKG_DIR/$p.list"
         if [ ! -r "$list" ]; then
-            log "Liste introuvable : $list"
-            continue
+            log "ERREUR : liste de profil introuvable : $list"
+            return 1
         fi
 
         for pkg in $(sed -e 's/#.*//' -e 's/[[:space:]]*$//' -e '/^$/d' "$list"); do
@@ -1121,7 +1189,8 @@ run_install() {
 # Mode --install-only : réinstalle les profils déjà enregistrés
 # ---------------------------------------------------------------------------
 
-if [ "$1" = "--install-only" ]; then
+if [ "${1:-}" = "--install-only" ] || \
+   { [ -e "$SETUP_READY_MARKER" ] && [ ! -e "$MARKER" ]; }; then
     if [ ! -r "$PROFILE_FILE" ]; then
         echo "Aucun profil enregistré ($PROFILE_FILE)." >&2
         exit 1
@@ -1131,10 +1200,24 @@ if [ "$1" = "--install-only" ]; then
     detect_ui
     run_install "$PROFILES"
     rc=$?
+    if ! configure_server_mode "$PROFILES"; then
+        rc=1
+    fi
     if [ "$rc" -eq 0 ]; then
-        ui_msg "$TITLE" "Applications installées avec succès." "Terminer"
+        if [ -e "$SETUP_READY_MARKER" ]; then
+            if touch "$MARKER"; then
+                rm -f -- "$SETUP_READY_MARKER"
+                rm -f -- "$0"
+                ui_msg "$TITLE" "Applications installées et configuration initiale terminée." "Terminer"
+            else
+                ui_msg "$TITLE" "Impossible d'enregistrer la fin de configuration. Relancez le script avec --install-only." "Terminer"
+                exit 1
+            fi
+        else
+            ui_msg "$TITLE" "Applications installées. La configuration initiale reste incomplète ; relancez le script sans option pour la terminer." "Terminer"
+        fi
     else
-        ui_msg "$TITLE" "Installation incomplète.\nVoir le journal : $LOG_FILE" "Terminer"
+        ui_msg "$TITLE" "Installation incomplète ou configuration du mode serveur impossible.\nLe script est conservé. Relancez : $0 --install-only\nVoir le journal : $LOG_FILE" "Terminer"
     fi
     exit "$rc"
 fi
@@ -1152,6 +1235,10 @@ mkdir -p "$STATE_DIR"
 detect_ui
 log "Interface utilisée : $UI"
 ui_welcome
+detect_hardware
+ui_msg "$TITLE" \
+    "Matériel détecté :\n\n$HARDWARE_REPORT\n\nLe rapport est enregistré dans $LOG_FILE." \
+    "Continuer"
 
 ask_language
 ask_keyboard
@@ -1160,7 +1247,7 @@ ask_system_services
 
 # Récapitulatif + confirmation
 if ! ui_yesno "$TITLE" \
-    "Récapitulatif :\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : KDE Plasma\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\n\nLes applications associées vont être installées."
+    "Récapitulatif :\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\n\nLes applications associées vont être installées."
 then
     echo "Configuration annulée. Relancez le script pour recommencer." >&2
     exit 1
@@ -1173,29 +1260,72 @@ apply_keyboard
 # accéder aux dépôts réseau lorsqu'une interface Wi‑Fi est disponible.
 setup_wifi_connection || true
 
-# Création du compte utilisateur principal avant la fin du premier démarrage.
-# Cela permet d'avoir un accès non-root immédiatement utilisable, avec ou sans sudo.
-ask_user_account
-create_user_account "$USER_NAME" "$USER_PASSWORD" "$USER_PRIVILEGES"
+# Debian Installer crée déjà le compte lors d'une installation sur disque.
+# En session live, il faut créer un compte distinct pour l'installation suivante.
+if ! grep -qw 'boot=live' /proc/cmdline && USER_NAME=$(find_regular_user) && [ -n "$USER_NAME" ]; then
+    USER_PRIVILEGES="configurés par Debian Installer"
+    log "Compte utilisateur existant conservé : $USER_NAME"
+else
+    ask_user_account
+    if ! create_user_account "$USER_NAME" "$USER_PASSWORD" "$USER_PRIVILEGES"; then
+        record_failure "Création ou configuration du compte $USER_NAME échouée."
+    fi
+fi
 
 # Activation des services système sélectionnés.
-enable_ssh_service || true
-enable_bluetooth_service || true
+if ! enable_ssh_service; then
+    record_failure "Activation du service SSH échouée."
+fi
+if ! enable_bluetooth_service; then
+    record_failure "Activation du service Bluetooth échouée."
+fi
 
 # Sauvegarde des profils (permet de relancer avec --install-only)
-echo "$PROFILES" > "$PROFILE_FILE"
+if ! printf '%s\n' "$PROFILES" > "$PROFILE_FILE"; then
+    record_failure "Impossible d'enregistrer les profils sélectionnés."
+fi
+
+if ! configure_server_mode "$PROFILES"; then
+    record_failure "Configuration du mode serveur échouée."
+fi
+
+if [ "$FIRST_BOOT_FAILED" = no ]; then
+    if ! touch "$SETUP_READY_MARKER"; then
+        record_failure "Impossible d'enregistrer l'état de configuration avant installation."
+    fi
+fi
 
 if run_install "$PROFILES"; then
     INSTALL_STATUS="Applications installées avec succès."
 else
+    PACKAGE_FAILED=yes
     INSTALL_STATUS="Installation incomplète (voir $LOG_FILE).\nRelancez : $0 --install-only"
 fi
 
 # Message final
+if [ "$FIRST_BOOT_FAILED" = no ] && [ "$PACKAGE_FAILED" = no ]; then
+    if touch "$MARKER"; then
+        rm -f -- "$SETUP_READY_MARKER"
+        rm -f -- "$0"
+    else
+        record_failure "Impossible d'enregistrer la fin de la configuration initiale."
+    fi
+fi
+
+if [ "$FIRST_BOOT_FAILED" = yes ] || [ "$PACKAGE_FAILED" = yes ]; then
+    if [ -n "$INSTALL_STATUS" ]; then
+        INSTALL_STATUS+=$'\n\n'
+    fi
+    INSTALL_STATUS+="Échecs détectés :${FIRST_BOOT_FAILURES}"
+    INSTALL_STATUS+=$'\nLe script est conservé pour permettre une nouvelle tentative.'
+    ui_msg "$TITLE" \
+        "Configuration initiale incomplète.\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\nUtilisateur          : $USER_NAME\nPrivilèges            : $USER_PRIVILEGES\n\n$INSTALL_STATUS" \
+        "Terminer"
+    exit 1
+fi
+
 ui_msg "$TITLE" \
-    "Configuration initiale terminée.\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : KDE Plasma\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\nUtilisateur          : $USER_NAME\nPrivilèges            : $USER_PRIVILEGES\n\n$INSTALL_STATUS" \
+    "Configuration initiale terminée.\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\nUtilisateur          : $USER_NAME\nPrivilèges            : $USER_PRIVILEGES\n\n$INSTALL_STATUS" \
     "Terminer"
 
-touch "$MARKER"
-# Le script ne doit pas rester présent après son premier lancement.
-rm -f -- "$0" 2>/dev/null || true
+rm -f -- "$0"

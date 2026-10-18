@@ -1,0 +1,5 @@
+# Generated images and locally compiled programs
+/dist/
+/ram_memory
+/chatia
+/chatia-gui

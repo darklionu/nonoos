@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Docker: smoke tests nonoos",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-c",
+				"docker build -f docker/Dockerfile -t nonoos-smoke . && docker run --rm nonoos-smoke"
+			],
+			"isBackground": false,
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "test"
+		}
+	]
+}

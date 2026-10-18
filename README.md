@@ -253,29 +253,45 @@ Il contient des composants liés à :
 
 ## 3) Construire et tester une ISO live
 
-Le projet nonoos contient le code source du noyau et un overlay `rootfs`, mais pas
-encore une image système complète. Le script `build-live-iso.sh` assemble une
-ISO live Debian 13 (trixie) amd64 avec `live-build`, copie les fichiers de
-`rootfs` dans le système live et active les services de premier démarrage.
+Le projet nonoos contient le code source du noyau Linux 7.2.6 et un overlay
+`rootfs`. Le script `build-live-iso.sh` compile ce noyau pour amd64, installe
+ses modules et son initramfs dans une ISO live Debian 13 (trixie) assemblée
+avec `live-build`. Il copie également les fichiers de `rootfs` et active les
+services de premier démarrage.
 Le même overlay est intégré sous `linux-7.2.6/rootfs` ; la construction de
 l'ISO continue d'utiliser le dossier `rootfs` à la racine du dépôt.
-L'image inclut KDE Plasma et SDDM par défaut et démarre en session live ; elle
-n'installe pas le système sur le disque.
+L'image inclut KDE Plasma et SDDM et propose une session live ainsi que
+l'installateur graphique Debian pour installer le système sur un disque.
+L'installateur copie le système live, y compris le noyau NonoOS compilé dans ce
+dépôt, puis installe GRUB pour le démarrage en BIOS ou UEFI.
 
-Sur un hôte Debian ou Ubuntu avec une connexion Internet et au moins 15 Go
+Sur un hôte Debian ou Ubuntu avec une connexion Internet et au moins 25 Go
 d'espace libre, installez les outils de construction puis lancez :
 
 ```bash
 sudo apt update
 sudo apt install live-build debootstrap xorriso squashfs-tools \
-  grub-pc-bin grub-efi-amd64-bin mtools dosfstools
+  grub-pc-bin grub-efi-amd64-bin mtools dosfstools build-essential \
+  bc bison flex libelf-dev libssl-dev openssl perl python3 kmod
 sudo bash build-live-iso.sh
 ```
 
-L'image nonoos sera créée dans `dist/nonoos-live-amd64.iso`. KDE Plasma est inclus
-dans l'image. Au premier démarrage, l'assistant propose de choisir la langue,
-le clavier et les logiciels ; les paquets choisis sont téléchargés depuis les
-dépôts Debian et, dans une session live, les modifications restent temporaires.
+L'image NonoOS sera créée dans `dist/nonoos-live-amd64.iso`. Au démarrage,
+choisissez l'entrée **Graphical install** de Debian Installer pour lancer
+l'installation guidée, ou l'entrée live pour essayer le système sans modifier
+le disque. L'installateur permet de choisir le disque et le partitionnement ;
+les opérations de partitionnement sont destructrices pour les partitions
+sélectionnées et doivent être vérifiées attentivement avant confirmation.
+
+Après installation, le système, les fichiers et les paquets installés sont
+conservés sur le disque. Au premier démarrage installé, l'assistant NonoOS
+propose de choisir la langue, le clavier, les services et les profils logiciels.
+Le compte créé par Debian Installer est conservé ; l'assistant ne crée pas de
+compte supplémentaire sur le système installé.
+Les paquets sélectionnés sont téléchargés depuis les dépôts Debian. Si le profil
+« Serveur » est sélectionné, l'assistant configure un démarrage en mode console
+(`multi-user.target`), sans interface graphique. En mode live, les changements
+restent temporaires et disparaissent au redémarrage.
 
 ### Vérifier les mises à jour avec KDE Discover
 
@@ -298,9 +314,9 @@ search` si Debian propose un paquet de backend Discover distinct dans les
 sources configurées.
 
 Cette opération met à jour les paquets Debian installés, pas l'image ISO ni
-directement le noyau source du dépôt. Comme le système démarre en session live
-sans persistance, les paquets installés et leurs mises à jour sont perdus au
-redémarrage.
+directement le noyau source du dépôt. Dans une session live sans persistance,
+les mises à jour sont perdues au redémarrage. Après installation sur disque,
+les paquets mis à jour restent installés.
 
 Pour essayer l'image dans QEMU (4 Go de mémoire vive recommandés) :
 
@@ -310,46 +326,84 @@ qemu-system-x86_64 -m 4G -smp 2 \
   -boot d -nic user,model=virtio-net-pci
 ```
 
-Le démarrage et l'installation de paquets nécessitent un accès réseau. Cette
-ISO de test est construite avec le noyau Debian fourni par `live-build` ; le
-noyau source `linux-7.2.6` du dépôt n'est pas encore compilé ni intégré à l'ISO.
+Le démarrage et l'installation de paquets nécessitent un accès réseau. L'ISO
+démarre avec le noyau amd64 compilé depuis `linux-7.2.6` ; `live-build`
+n'installe pas de noyau Debian en parallèle. Le build utilise la configuration
+`x86_64_defconfig`, avec les systèmes de fichiers et pilotes nécessaires au
+démarrage live activés en modules. L'image inclut aussi Debian Installer en
+mode « live », qui installe une copie persistante de ce système sur le disque ;
+il ne s'agit pas d'une installation Debian générique qui remplacerait NonoOS.
+
+### Tests rapides avec Docker
+
+Pour compiler et vérifier les fonctions essentielles de ChatIA (salutation,
+calcul et détection USB) et de l'outil mémoire (RAM et CPU), depuis la racine
+du dépôt :
+
+```bash
+docker build -f docker/Dockerfile -t nonoos-smoke .
+docker run --rm nonoos-smoke
+```
+
+Ces tests valident les programmes en espace utilisateur dans Debian ; ils ne
+compilent ni ne démarrent le noyau Linux. Les ISO générées dans `dist/` et les
+binaires de test compilés à la racine sont ignorés par Git.
 
 ## 4) Gestion des paquets
 
-La gestion des paquets est déjà présente dans le système racine. Le script de démarrage [rootfs/etc/init.d/first-boot](rootfs/etc/init.d/first-boot) utilise notamment `apt-get` et `dpkg` pour installer les dépendances et logiciels nécessaires, comme `openssh-server`, `bluez`, `network-manager` et d’autres composants système.
+Au premier démarrage, l'assistant [rootfs/etc/init.d/first-boot](rootfs/etc/init.d/first-boot) détecte et affiche le modèle de la machine, le processeur, la mémoire vive, les composants graphiques, les disques, les interfaces réseau et les périphériques USB. Le rapport est également ajouté à `/var/log/newdistrib-first-boot.log`. L'assistant permet ensuite de sélectionner un ou plusieurs profils : bureautique, développement, cybersécurité, vie privée, serveur, multimédia, éducation, jeux et personnalisé. Les paquets sélectionnés sont installés avec `apt-get`.
+
+Chaque profil correspond à une liste de paquets dans [rootfs/usr/share/newdistrib/packages/](rootfs/usr/share/newdistrib/packages/). Pour personnaliser les applications proposées, modifiez le fichier `.list` correspondant avant de construire l'ISO. Le profil `custom` charge `custom.list`, prévu pour vos propres paquets. Une ligne contient un nom de paquet ; les lignes vides et celles commençant par `#` sont ignorées. Plusieurs profils peuvent être choisis et les doublons de paquets sont supprimés lors de l'installation.
+
+La gestion des paquets système est également utilisée pour installer les composants optionnels, comme `openssh-server`, `bluez` et `network-manager`.
+
+En cas d'échec de création du compte, d'activation d'un service ou d'installation,
+la configuration n'est pas marquée comme terminée et le script de premier
+démarrage est conservé. Si seule l'installation des paquets a échoué après la
+configuration du compte et des services, relancez-la avec
+`sudo /etc/init.d/first-boot --install-only`. Si une autre étape a échoué,
+relancez `/etc/init.d/first-boot` sans option pour reprendre l'assistant. Une
+nouvelle tentative n'est considérée comme terminée qu'après la réussite des
+étapes requises.
 
 Cela signifie que le projet n’a pas seulement le noyau Linux, mais aussi une couche d’installation logicielle déjà prévue pour l’environnement final.
 
 ---
 
-## 5) Programme de surveillance mémoire et CPU
+## 5) Centre de contrôle mémoire
 
-Le dépôt contient aussi un petit programme C++ de diagnostic système situé dans le dossier :
+Le dépôt contient un tableau de bord C++/Qt qui affiche la RAM utilisée et les
+processus triés par consommation mémoire :
 
-- rootfs/usr/src/memory/ram_memory.cpp
+- `linux-7.2.6/nonoos-info/système _principal.cpp`
+- `rootfs/usr/src/memory/ram_memory.h`
 
-Ce programme lit les fichiers procfs suivants :
-- /proc/meminfo pour afficher la RAM totale, la RAM disponible et la RAM utilisée
-- /proc/stat pour mesurer l’utilisation du CPU sur une période d’une seconde
-
-Exemple de sortie :
-
-```text
-RAM totale     : 3394 Mo
-RAM disponible : 1683 Mo
-RAM utilisee   : 1710 Mo
-Usage CPU      : 2.52525 %
-```
-
-Compilation :
+Les mesures sont lues dans `/proc/meminfo` et `/proc/<PID>/status`. Les
+exécutables sont identifiés avec `/proc/<PID>/exe` lorsqu'ils sont accessibles.
+Installez Qt 6 Widgets et compilez depuis la racine du dépôt :
 
 ```bash
-g++ -std=c++17 rootfs/usr/src/memory/ram_memory.cpp -o ram_memory
-./ram_memory
+sudo apt install g++ pkg-config qt6-base-dev
+g++ -std=c++17 -Wall -Wextra -pedantic \
+  -I rootfs/usr/src/memory \
+  "linux-7.2.6/nonoos-info/système _principal.cpp" \
+  $(pkg-config --cflags --libs Qt6Widgets) \
+  -o nonoos-info
+./nonoos-info
 ```
 
-Ce programme est utile pour vérifier rapidement l’état du système sans dépendre d’outils externes, et il complète l’environnement Linux du dépôt avec un outil de supervision simple et portable.
-- gestion de l’isolation virtuelle
+La fenêtre s’actualise automatiquement toutes les deux secondes. Les processus
+dont les informations ne sont pas accessibles à l’utilisateur courant peuvent
+être absents de la liste.
+
+L’outil en ligne de commande RAM/CPU reste disponible séparément :
+
+```bash
+g++ -std=c++17 -Wall -Wextra -pedantic \
+  -I rootfs/usr/src/memory rootfs/usr/src/memory/ram_memory.cpp \
+  -o ram-memory
+./ram-memory
+```
 
 ---
 

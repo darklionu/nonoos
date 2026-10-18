@@ -40,12 +40,13 @@ Avant de compiler le projet, vérifie que les dépendances suivantes sont instal
 - compilateur C++ (`g++` ou `clang++`)
 - bibliothèque `libcurl`
 - bibliothèque JSON de type `nlohmann/json`
+- Qt 6 Widgets et Qt Concurrent pour l'interface graphique
 
 Sur Ubuntu/Debian, tu peux installer les paquets avec :
 
 ```bash
 sudo apt update
-sudo apt install g++ libcurl4-openssl-dev nlohmann-json3-dev
+sudo apt install g++ libcurl4-openssl-dev nlohmann-json3-dev qt6-base-dev
 ```
 
 ## Compilation
@@ -54,8 +55,19 @@ Depuis le dossier du projet :
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -pedantic -I. \
-    main.cpp Chatbot.cpp IntentDetector.cpp TextProcessing.cpp WeatherService.CPP \
+    main.cpp Chatbot.cpp IntentDetector.cpp TextProcessing.cpp WeatherService.CPP UsbService.cpp \
     -o chatia -lcurl
+```
+
+Pour compiler l'interface graphique Qt 6 :
+
+```bash
+g++ -std=c++17 -Wall -Wextra -pedantic -I. \
+    $(pkg-config --cflags Qt6Widgets Qt6Concurrent libcurl) \
+    -x c++ INTERFACE Chatbot.cpp IntentDetector.cpp TextProcessing.cpp \
+    WeatherService.CPP UsbService.cpp \
+    -o chatia-gui \
+    $(pkg-config --libs Qt6Widgets Qt6Concurrent libcurl)
 ```
 
 ## Utilisation
@@ -65,6 +77,9 @@ Lance l'exécutable :
 ```bash
 ./chatia
 ```
+
+Pour lancer l'interface graphique, utilise `./chatia-gui` depuis une session
+de bureau.
 
 Puis entre des messages comme :
 

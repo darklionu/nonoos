@@ -1,0 +1,37 @@
+# Profil : Cybersécurité
+nmap
+masscan
+wireshark
+tcpdump
+netcat-openbsd
+whois
+dnsutils
+traceroute
+john
+hashcat
+hydra
+aircrack-ng
+sqlmap
+nikto
+gobuster
+ettercap-text-only
+binwalk
+radare2
+foremost
+testdisk
+hexedit
+gdb
+lynis
+clamav
+openvpn
+wireguard
+tor
+proxychains4
+python3
+python3-pip
+git
+curl
+wget
+# Disponibles uniquement dans certains dépôts tiers.
+metasploit-framework
+burpsuite

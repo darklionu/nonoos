@@ -1,0 +1,6 @@
+# Profil : Personnalisé
+# Modifiez cette liste avant de construire l'ISO pour choisir vos paquets.
+gparted
+htop
+vlc
+gimp
