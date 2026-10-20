@@ -272,7 +272,8 @@ d'espace libre, installez les outils de construction puis lancez :
 sudo apt update
 sudo apt install live-build debootstrap xorriso squashfs-tools \
   grub-pc-bin grub-efi-amd64-bin mtools dosfstools build-essential \
-  bc bison flex libelf-dev libssl-dev openssl perl python3 kmod
+  bc bison flex libelf-dev libssl-dev openssl perl python3 kmod \
+  qt6-base-dev
 sudo bash build-live-iso.sh
 ```
 
@@ -293,30 +294,36 @@ Les paquets sélectionnés sont téléchargés depuis les dépôts Debian. Si le
 (`multi-user.target`), sans interface graphique. En mode live, les changements
 restent temporaires et disparaissent au redémarrage.
 
-### Vérifier les mises à jour avec KDE Discover
+### Centre graphique de logiciels et mises à jour
 
-KDE Discover n'est pas encore inclus dans la liste des paquets de
-`build-live-iso.sh`. Pour l'essayer dans une session live, connectez-vous à
-Internet puis installez-le depuis un terminal :
+L'application **Logiciels et mises à jour NonoOS** est disponible dans le menu
+du bureau KDE. Elle fournit deux fonctions :
 
-```bash
-sudo apt update
-apt-cache search '^plasma-discover'
-sudo apt install plasma-discover
-```
+- **Mises à jour** : actualise les index APT, affiche les paquets pouvant être
+  mis à niveau, puis propose une confirmation avant d'exécuter
+  `apt-get upgrade`. L'opération demande une autorisation administrateur via
+  PolicyKit, conserve les configurations locales et ne supprime pas de paquets
+  pour résoudre les dépendances.
+- **Applications** : affiche les paquets décrits dans les profils de
+  `rootfs/usr/share/newdistrib/packages/`, permet de filtrer par profil et nom,
+  puis installe ou supprime les paquets sélectionnés après confirmation et
+  autorisation administrateur. La suppression ne lance pas `autoremove` :
+  les dépendances ne sont pas retirées automatiquement.
 
-Ouvrez ensuite **Discover** depuis le menu des applications, choisissez
-l'onglet **Mises à jour** et lancez la recherche. L'installation des mises à
-jour demandera une autorisation administrateur. Pour inclure Discover dans
-chaque nouvelle ISO, ajoutez `plasma-discover` à la liste des paquets dans
-`build-live-iso.sh`, puis reconstruisez l'image. Vérifiez avec `apt-cache
-search` si Debian propose un paquet de backend Discover distinct dans les
-sources configurées.
+Les opérations utilisent les dépôts APT configurés sur le système. APT vérifie
+les signatures des dépôts et paquets selon sa configuration Debian. Configurez
+uniquement des dépôts de confiance. Cette fonction met à jour les paquets
+Debian installés ; le noyau NonoOS compilé directement dans l’ISO n’est pas un
+paquet APT et ne peut donc pas être mis à jour par cette interface. Une mise à
+jour du noyau NonoOS nécessitera de publier et signer un paquet noyau dans un
+dépôt configuré.
 
-Cette opération met à jour les paquets Debian installés, pas l'image ISO ni
-directement le noyau source du dépôt. Dans une session live sans persistance,
-les mises à jour sont perdues au redémarrage. Après installation sur disque,
-les paquets mis à jour restent installés.
+Les changements effectués dans la session live sont temporaires et disparaissent
+au redémarrage. Après installation sur disque, les mises à jour et applications
+installées restent présentes. La compilation de l'interface depuis le dépôt
+nécessite Qt 6 Widgets sur l'hôte de construction ; le script
+`build-live-iso.sh` inclut le binaire et les composants PolicyKit nécessaires
+dans l'ISO.
 
 Pour essayer l'image dans QEMU (4 Go de mémoire vive recommandés) :
 
@@ -367,6 +374,26 @@ nouvelle tentative n'est considérée comme terminée qu'après la réussite des
 étapes requises.
 
 Cela signifie que le projet n’a pas seulement le noyau Linux, mais aussi une couche d’installation logicielle déjà prévue pour l’environnement final.
+
+---
+
+## Compiler le centre graphique depuis les sources
+
+Sur Debian ou Ubuntu, avec Qt 6 Widgets installé, compilez l'application depuis
+la racine du dépôt :
+
+```bash
+sudo apt install g++ pkg-config qt6-base-dev
+g++ -std=c++17 -Wall -Wextra -pedantic \
+  "rootfs/gestionnaire de mise à jour/interface_graphique.cpp" \
+  $(pkg-config --cflags --libs Qt6Widgets) \
+  -o nonoos-software-center
+./nonoos-software-center
+```
+
+Pour exécuter les opérations APT depuis cette compilation locale, le système
+doit également disposer de `pkexec`, `polkitd` et d'un agent d'authentification
+PolicyKit dans la session graphique.
 
 ---
 

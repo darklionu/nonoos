@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Logiciels et mises à jour NonoOS
+Comment=Installer des applications et mettre à jour le système
+Exec=/usr/bin/nonoos-software-center
+Icon=system-software-install
+Terminal=false
+Categories=System;PackageManager;
+StartupNotify=true

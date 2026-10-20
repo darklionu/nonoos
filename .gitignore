@@ -3,3 +3,6 @@
 /ram_memory
 /chatia
 /chatia-gui
+
+# Large kernel source archive (download separately)
+/linux-7.2.6.tar.xz
