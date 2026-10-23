@@ -110,6 +110,7 @@ sudo
 locales
 keyboard-configuration
 ca-certificates
+libsdl2-dev
 kde-plasma-desktop
 sddm
 plasma-nm
