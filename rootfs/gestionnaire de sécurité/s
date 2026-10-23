@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: nonoos-firewall [status|setup]
+
+  status  Affiche l'état du pare-feu sans modifier la configuration.
+  setup   Configure UFW (entrées refusées, sorties autorisées, SSH autorisé)
+          puis demande confirmation avant son activation.
+EOF
+}
+
+action="${1:-setup}"
+if [[ "$#" -gt 1 ]]; then
+    usage >&2
+    exit 2
+fi
+
+case "$action" in
+    status|setup) ;;
+    -h|--help|help)
+        usage
+        exit 0
+        ;;
+    *)
+        printf 'Action inconnue : %s\n' "$action" >&2
+        usage >&2
+        exit 2
+        ;;
+esac
+
+if ! command -v ufw >/dev/null 2>&1; then
+    echo "UFW n'est pas installé. Installez le paquet « ufw », puis réessayez." >&2
+    exit 1
+fi
+
+if [[ "$EUID" -ne 0 ]]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "Les droits administrateur sont requis et sudo est indisponible." >&2
+        exit 1
+    fi
+    exec sudo -- "$0" "$action"
+fi
+
+if [[ "$action" == "status" ]]; then
+    exec ufw status verbose
+fi
+
+cat <<'EOF'
+Configuration proposée :
+  - refuser les connexions entrantes par défaut ;
+  - autoriser les connexions sortantes ;
+  - autoriser SSH sur le port TCP 22 ;
+  - conserver les règles UFW existantes.
+
+Vérifiez que le port SSH 22 correspond à votre configuration. Si vous utilisez
+un autre port SSH, ne continuez pas avant d'avoir adapté le script.
+EOF
+
+if [[ ! -t 0 ]]; then
+    echo "Confirmation requise sur un terminal interactif ; aucune règle modifiée." >&2
+    exit 1
+fi
+
+read -r -p "Appliquer ces règles et activer le pare-feu ? [o/N] " answer
+case "$answer" in
+    o|O|oui|Oui|OUI) ;;
+    *)
+        echo "Annulé ; aucune règle modifiée."
+        exit 0
+        ;;
+esac
+
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp comment 'SSH NonoOS'
+ufw --force enable
+ufw status verbose

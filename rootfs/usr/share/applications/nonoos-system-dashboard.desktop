@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Tableau de bord système NonoOS
+Comment=Consulter l’activité CPU, la mémoire, les disques et les processus
+Exec=/usr/local/bin/nonoos-dashboard
+Icon=utilities-system-monitor
+Terminal=true
+Categories=System;Monitor;
+StartupNotify=false

@@ -99,6 +99,7 @@ Intent IntentDetector::detect(const std::string& input) const {
         {Intent::Goodbye, {"au revoir", "bye", "adieu", "a plus"}},
         {Intent::Usb, {"usb", "port usb", "périphérique usb", "dispositif usb", "connecte au usb", "branche usb", "portserie", "ttyusb"}},
         {Intent::Help, {"aide", "help", "assistance", "support"}},
+        {Intent::Rapelle, {"rappel", "rappele", "rappelle", "rapelle", "souviens toi", "souviens toi de", "souvient toi"}},
     };
 
     double best = 0.0;

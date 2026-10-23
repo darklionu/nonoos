@@ -325,6 +325,115 @@ nécessite Qt 6 Widgets sur l'hôte de construction ; le script
 `build-live-iso.sh` inclut le binaire et les composants PolicyKit nécessaires
 dans l'ISO.
 
+### Gestionnaire de sécurité
+
+Le menu KDE contient **Sécurité NonoOS**, une interface qui actualise toutes
+les cinq secondes l'inventaire des processus, des services actifs, des
+connexions réseau et des compteurs d'octets reçus/envoyés par interface.
+Le seuil d'alerte initial est de 10 MiB envoyés par interface entre deux
+actualisations. Le gestionnaire n'attribue pas ce trafic à un processus et ne
+bloque pas automatiquement les connexions.
+
+Les permissions affichées sont celles des applications Flatpak ; Linux ne
+fournit pas de modèle de permissions uniforme pour toutes les applications
+installées. Les processus et services sont répertoriés pour inspection, mais
+l'outil ne décide pas qu'ils sont « inutiles ». L'arrêt d'un service sélectionné
+demande une confirmation, puis une autorisation administrateur ; il ne le
+désactive pas au prochain démarrage et aucun processus n'est tué.
+
+Les mêmes informations sont disponibles dans un terminal :
+
+```bash
+nonoos-security scan
+nonoos-security monitor --interval 5 --threshold-mib 10
+nonoos-security stop-service nom-du-service.service
+```
+
+La commande est écrite en Rust et compilée pendant la construction de l’ISO ;
+`rustc` est donc requis sur l’hôte de construction.
+La surveillance terminale mesure le trafic par interface jusqu'à `Ctrl+C`.
+L'arrêt en ligne de commande demande de retaper le nom complet du service avant
+de solliciter l'autorisation administrateur.
+
+Le script `nonoos-firewall` configure UFW après confirmation interactive :
+refus des connexions entrantes par défaut, sorties autorisées et accès SSH
+autorisé sur TCP 22 avant activation. Il conserve les règles existantes, mais
+la modification de la politique entrante peut interrompre d'autres services.
+Vérifiez le port SSH utilisé et les règles affichées avant de confirmer.
+Pour consulter la configuration sans la modifier, lancez
+`nonoos-firewall status`.
+
+### Gestionnaire de démarrage
+
+Le menu KDE contient **Gestionnaire de démarrage NonoOS**, qui affiche les
+services systemd configurés comme activés ou désactivés au démarrage. La liste
+peut être filtrée par nom. Les unités protégées et les états non modifiables
+(par exemple `static`, `masked` ou `indirect`) sont affichés sans action ;
+seuls les services `enabled` et `disabled` non protégés peuvent être modifiés.
+
+L’activation ou la désactivation demande une confirmation, puis une
+authentification administrateur via PolicyKit (`pkexec`). Elle modifie
+l’activation pour les prochains démarrages, sans démarrer ni arrêter le service
+immédiatement. Évitez de désactiver un service dont le rôle n’est pas connu :
+cela peut perturber le réseau, la session graphique ou le démarrage. L’outil
+ne propose pas de désactivation globale. L’application nécessite une session
+Linux démarrée avec systemd, `systemctl`, `pkexec`, `polkitd` et un agent
+PolicyKit actif dans la session graphique. Les changements faits dans la
+session live sont temporaires et disparaissent au redémarrage.
+
+Le code source se trouve dans
+[`rootfs/apps/gestionnaire-demarrage/main.cpp`](rootfs/apps/gestionnaire-demarrage/main.cpp).
+Le script `build-live-iso.sh` compile le programme et l’installe dans l’image
+avec son raccourci KDE. Pour compiler et lancer l’application séparément depuis
+la racine du dépôt, installez Qt 6 Widgets et les outils de compilation, puis
+exécutez :
+
+```bash
+sudo apt install g++ pkg-config qt6-base-dev
+g++ -std=c++17 -Wall -Wextra -pedantic \
+  "rootfs/apps/gestionnaire-demarrage/main.cpp" \
+  $(pkg-config --cflags --libs Qt6Widgets) \
+  -o nonoos-startup-manager
+./nonoos-startup-manager
+```
+
+Pour inclure le gestionnaire dans une ISO, reconstruisez l’image depuis la
+racine du dépôt :
+
+```bash
+sudo bash build-live-iso.sh
+```
+
+Une fois démarrée, lancez **Gestionnaire de démarrage NonoOS** depuis le menu
+KDE.
+
+### Tableau de bord système et compte de test isolé
+
+Le menu KDE propose **Tableau de bord système NonoOS**, un tableau de bord en
+terminal qui actualise la charge CPU, la mémoire, l’espace disque et les
+processus. Appuyez sur `q` pour le quitter. La commande équivalente est
+`nonoos-dashboard`.
+
+Pour créer un compte de test sans privilèges administrateur, lancez depuis un
+terminal avec un mot de passe choisi pour ce compte :
+
+```bash
+sudo nonoos-create-test-user
+```
+
+Le compte `nonoos-test` ouvre une session interactive dans Bubblewrap, sans
+réseau, avec le système de fichiers de l’hôte en lecture seule. Son dossier
+personnel reste inscriptible et persistant ; `/tmp`, `/run` et `/var/tmp` sont
+privés et temporaires. Un autre nom peut être fourni en argument. L’ISO installe
+le paquet `bubblewrap` et les commandes `nonoos-dashboard`,
+`nonoos-create-test-user` et `nonoos-test-shell`.
+
+Ce bac à sable partage le noyau Linux et ne constitue pas une garantie contre
+les failles du noyau ou les vulnérabilités d’évasion. N’y exécutez pas de code
+réellement hostile ; utilisez une machine virtuelle jetable pour une isolation
+plus forte. La création du compte ajoute un utilisateur au système et les
+fichiers conservés dans son dossier personnel occupent de l’espace disque.
+
 Pour essayer l'image dans QEMU (4 Go de mémoire vive recommandés) :
 
 ```bash

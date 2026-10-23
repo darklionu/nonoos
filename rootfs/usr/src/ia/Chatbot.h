@@ -2,6 +2,7 @@
 #pragma once
 #include <string>
 #include "IntentDetector.h"
+#include "RappelService.h"
 #include "UsbService.h"
 #include "WeatherService.h"
 
@@ -17,6 +18,7 @@ private:
     IntentDetector intentDetector_;
     WeatherService weatherService_;
     UsbService usbService_;
+    RappelService rappelService_;
 };
 
 }

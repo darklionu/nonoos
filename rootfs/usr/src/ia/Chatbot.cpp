@@ -266,7 +266,9 @@ std::string Chatbot::generateReply(const std::string& input) {
             return usbService_.listConnectedDevices();
 
         case Intent::Help:
-            return "Commandes disponibles :\n- bonjour\n- météo\n- heure\n- date\n- merci\n- au revoir\n- calcul\n- usb";
+            return "Commandes disponibles :\n- bonjour\n- météo\n- heure\n- date\n- merci\n- au revoir\n- calcul\n- usb\n- rappelle-moi de <tâche>\n- liste mes rappels\n- supprime le rappel <numéro>";
+        case Intent::Rapelle:
+            return rappelService_.handleRequest(input);
 
         default:
             return "Je ne comprends pas encore tout, mais je peux t'aider avec bonjour, météo, heure, date, calcul, usb, ou simplement parler.";

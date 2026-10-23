@@ -16,7 +16,8 @@ enum class Intent {
     Calculator,
     Usb,
     Help,
-    Unknown
+    Unknown,
+    Rapelle
 };
 
 class IntentDetector {

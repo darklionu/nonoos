@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Gestionnaire de démarrage NonoOS
+Comment=Gérer les services lancés automatiquement par systemd
+Exec=/usr/bin/nonoos-startup-manager
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;
+StartupNotify=true

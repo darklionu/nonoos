@@ -6,6 +6,7 @@ ChatIA est un petit assistant conversationnel écrit en C++ pour répondre en fr
 - présentation du bot
 - météo d'une ville
 - heure et date
+- rappels sauvegardés entre les sessions
 - remerciements
 - au revoir
 - calculs simples et expressions mathématiques
@@ -16,7 +17,8 @@ Le projet repose sur une détection d'intention à partir du texte saisi par l'u
 
 - normalisation du texte (accents, espaces, minuscules)
 - détection de mots-clés et similarité approximative pour gérer les fautes de frappe
-- identification d'intentions : bonjour, météo, heure, date, merci, au revoir, qui es-tu, calcul, usb
+- identification d'intentions : bonjour, météo, heure, date, merci, au revoir, qui es-tu, calcul, usb, rappel
+- création, consultation et suppression de rappels persistants
 - calcul d'expressions arithmétiques avec `+`, `-`, `*`, `/`, `%`, `^` et parenthèses
 - détection et liste des périphériques USB connectés sur le système, avec identification des ports série (`ttyUSB*`, `ttyACM*`)
 - récupération de la météo via l'API Open-Meteo
@@ -32,6 +34,7 @@ Le projet repose sur une détection d'intention à partir du texte saisi par l'u
 - `TextProcessing.h` / `TextProcessing.cpp` : normalisation et traitement du texte
 - `calcul.h` : fonctions mathématiques réutilisables et primitives de calcul
 - `WeatherService.h` / `WeatherService.CPP` : recherche de ville et récupération de la météo
+- `RappelService.h` / `rapelle.cpp` : gestion et sauvegarde des rappels dans `~/.config/chatia/rappels.txt`
 
 ## Prérequis
 
@@ -55,7 +58,7 @@ Depuis le dossier du projet :
 
 ```bash
 g++ -std=c++17 -Wall -Wextra -pedantic -I. \
-    main.cpp Chatbot.cpp IntentDetector.cpp TextProcessing.cpp WeatherService.CPP UsbService.cpp \
+    main.cpp Chatbot.cpp IntentDetector.cpp TextProcessing.cpp WeatherService.CPP UsbService.cpp rapelle.cpp \
     -o chatia -lcurl
 ```
 
@@ -65,7 +68,7 @@ Pour compiler l'interface graphique Qt 6 :
 g++ -std=c++17 -Wall -Wextra -pedantic -I. \
     $(pkg-config --cflags Qt6Widgets Qt6Concurrent libcurl) \
     -x c++ INTERFACE Chatbot.cpp IntentDetector.cpp TextProcessing.cpp \
-    WeatherService.CPP UsbService.cpp \
+    WeatherService.CPP UsbService.cpp rapelle.cpp \
     -o chatia-gui \
     $(pkg-config --libs Qt6Widgets Qt6Concurrent libcurl)
 ```
@@ -92,6 +95,9 @@ calcule 12 * 7
 combien fait 8 * (3 + 2) ?
 merci
 au revoir
+rappelle-moi d'acheter du pain
+liste mes rappels
+supprime le rappel 1
 ```
 
 La calculatrice intégrée accepte également des formulations plus naturelles, par exemple :
@@ -102,6 +108,18 @@ combien fait 10 plus 5 ?
 12 divise par 3
 2 puissance 10
 ```
+
+Les rappels sont enregistrés dans `~/.config/chatia/rappels.txt` et restent
+disponibles après le redémarrage du programme. Exemples :
+
+```text
+rappelle-moi d'acheter du pain
+quels sont mes rappels ?
+supprime le rappel 1
+```
+
+ChatIA enregistre ici le texte du rappel ; cette version ne déclenche pas encore
+de notification à une date ou une heure précises.
 
 Pour demander une commande administrateur, saisis-la directement, par exemple :
 

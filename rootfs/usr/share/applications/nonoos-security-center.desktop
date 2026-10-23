@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sécurité NonoOS
+Comment=Inspecter les processus, services, permissions Flatpak et le trafic réseau
+Exec=/usr/bin/nonoos-security-center
+Icon=security-high
+Terminal=false
+Categories=System;Security;
+StartupNotify=true

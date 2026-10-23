@@ -17,7 +17,7 @@ if [[ ! -f "$KERNEL_SOURCE/Makefile" ]]; then
 fi
 
 missing=()
-for tool in lb debootstrap xorriso mksquashfs gcc g++ pkg-config make bc bison flex openssl depmod perl python3 nproc; do
+for tool in lb debootstrap xorriso mksquashfs gcc g++ pkg-config make bc bison flex openssl depmod perl python3 rustc nproc; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         missing+=("$tool")
     fi
@@ -26,7 +26,7 @@ done
 if (("${#missing[@]}" > 0)); then
     printf 'Outils manquants : %s\n' "${missing[*]}" >&2
     echo "Sur Debian/Ubuntu, installez-les avec :" >&2
-    echo "  sudo apt update && sudo apt install live-build debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools dosfstools build-essential bc bison flex libelf-dev libssl-dev openssl perl python3 kmod qt6-base-dev" >&2
+    echo "  sudo apt update && sudo apt install live-build debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools dosfstools build-essential bc bison flex libelf-dev libssl-dev openssl perl python3 rustc kmod qt6-base-dev" >&2
     exit 1
 fi
 
@@ -43,6 +43,19 @@ g++ -std=c++17 -Wall -Wextra -pedantic \
     "$PROJECT_DIR/rootfs/gestionnaire de mise à jour/interface_graphique.cpp" \
     $(pkg-config --cflags --libs Qt6Widgets) \
     -o "$BUILD_DIR/nonoos-software-center"
+
+g++ -std=c++17 -Wall -Wextra -pedantic \
+    "$PROJECT_DIR/rootfs/gestionnaire de sécurité/interface.cpp" \
+    $(pkg-config --cflags --libs Qt6Widgets) \
+    -o "$BUILD_DIR/nonoos-security-center"
+
+g++ -std=c++17 -Wall -Wextra -pedantic \
+    "$PROJECT_DIR/rootfs/apps/gestionnaire-demarrage/main.cpp" \
+    $(pkg-config --cflags --libs Qt6Widgets) \
+    -o "$BUILD_DIR/nonoos-startup-manager"
+
+rustc --edition=2021 -O "$PROJECT_DIR/src/nonoos-security.rs" \
+    -o "$BUILD_DIR/nonoos-security"
 
 KERNEL_BUILD_DIR="$BUILD_DIR/kernel-build"
 KERNEL_STAGE="$BUILD_DIR/kernel-stage"
@@ -107,11 +120,31 @@ polkitd
 polkit-kde-agent-1
 libqt6widgets6
 qt6-qpa-plugins
+python3
+procps
+iproute2
+flatpak
+ufw
+bubblewrap
 EOF
 
 cp -a "$PROJECT_DIR/rootfs/." config/includes.chroot/
 install -D -m 0755 "$BUILD_DIR/nonoos-software-center" \
     config/includes.chroot/usr/bin/nonoos-software-center
+install -D -m 0755 "$BUILD_DIR/nonoos-security-center" \
+    config/includes.chroot/usr/bin/nonoos-security-center
+install -D -m 0755 "$BUILD_DIR/nonoos-startup-manager" \
+    config/includes.chroot/usr/bin/nonoos-startup-manager
+install -D -m 0755 "$BUILD_DIR/nonoos-security" \
+    config/includes.chroot/usr/bin/nonoos-security
+install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_tableauxdebord.sh" \
+    config/includes.chroot/usr/local/bin/nonoos-dashboard
+install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_newuser.sh" \
+    config/includes.chroot/usr/local/bin/nonoos-create-test-user
+install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_testshell.sh" \
+    config/includes.chroot/usr/local/bin/nonoos-test-shell
+install -D -m 0755 "$PROJECT_DIR/rootfs/gestionnaire de sécurité/s" \
+    config/includes.chroot/usr/local/bin/nonoos-firewall
 mkdir -p config/includes.chroot/boot config/includes.chroot/lib/modules
 install -m 0644 "$KERNEL_BUILD_DIR/arch/x86/boot/bzImage" \
     "config/includes.chroot/boot/vmlinuz-$KERNEL_RELEASE"
