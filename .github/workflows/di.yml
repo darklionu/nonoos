@@ -1,0 +1,155 @@
+name: testec
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "rootfs/**"
+      - ".github/workflows/di.yml"
+      - "docker/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "rootfs/**"
+      - ".github/workflows/di.yml"
+      - "docker/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compilerapps:
+    name: Compiler les applications
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Qt 6
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++ pkg-config qt6-base-dev
+
+      - name: Compiler le gestionnaire de démarrage
+        run: |
+          g++ -std=c++17 -Wall -Wextra -pedantic \
+            "rootfs/apps/gestionnaire-demarrage/main.cpp" \
+            $(pkg-config --cflags --libs Qt6Widgets) \
+            -o /tmp/nonoos-startup-manager
+
+  compileretc:
+    name: Vérifier les scripts système
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Vérifier la syntaxe des scripts shell
+        shell: bash
+        run: |
+          while IFS= read -r -d '' script; do
+            echo "Vérification : $script"
+            bash -n "$script"
+          done < <(
+            find rootfs -type f \
+              \( -name '*.sh' \
+                -o -path 'rootfs/etc/init.d/*' \
+                -o -path 'rootfs/gestionnaire de sécurité/s' \) \
+              -print0
+          )
+
+  compilergestionnairedesecurite:
+    name: Compiler le gestionnaire de sécurité
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Qt 6
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++ pkg-config qt6-base-dev
+
+      - name: Compiler le gestionnaire de sécurité
+        run: |
+          g++ -std=c++17 -Wall -Wextra -pedantic \
+            "rootfs/gestionnaire de sécurité/interface.cpp" \
+            $(pkg-config --cflags --libs Qt6Widgets) \
+            -o /tmp/nonoos-security-center
+
+  compilergestionnairemiseajour:
+    name: Compiler le gestionnaire de mise à jour
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Qt 6
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++ pkg-config qt6-base-dev
+
+      - name: Compiler le gestionnaire de mise à jour
+        run: |
+          g++ -std=c++17 -Wall -Wextra -pedantic \
+            "rootfs/gestionnaire de mise à jour/interface_graphique.cpp" \
+            $(pkg-config --cflags --libs Qt6Widgets) \
+            -o /tmp/nonoos-software-center
+
+  compilerinternet:
+    name: Compiler le module Internet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Compiler le scanner Wi-Fi
+        run: |
+          gcc -std=c11 -Wall -Wextra -pedantic \
+            -c rootfs/usr/share/internet/wifiscan.c \
+            -o /tmp/wifiscan.o
+
+  compilermemory:
+    name: Vérifier le module mémoire
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Vérifier la compilation du module mémoire
+        run: |
+          g++ -std=c++17 -Wall -Wextra -pedantic \
+            -Irootfs/usr/src/memory \
+            -fsyntax-only rootfs/usr/src/memory/ram_memory.cpp
+
+  compileria:
+    name: Compiler et tester ChatIA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Construire et exécuter les tests de fumée
+        run: |
+          docker build --file docker/Dockerfile --tag nonoos-rootfs-tests .
+          docker run --rm --network none nonoos-rootfs-tests
+
+  compilerusb:
+    name: Compiler le module USB
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer libusb
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes g++ libusb-1.0-0-dev pkg-config
+
+      - name: Compiler l’outil USB
+        run: |
+          g++ -std=c++17 -Wall -Wextra -pedantic \
+            rootfs/usr/src/USB/bootusb.cpp \
+            $(pkg-config --cflags --libs libusb-1.0) \
+            -o /tmp/nonoos-usb
