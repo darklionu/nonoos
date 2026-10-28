@@ -15,6 +15,7 @@ Le dépôt sert à construire une image ISO bootable pour x86_64, avec une confi
   - centre de sécurité
   - pare-feu UFW
   - tableau de bord de maintenance
+  - assistant ChatIA, scanner Wi-Fi et outils de diagnostic USB et mémoire
   - scripts de création d’utilisateur et de tests
 - Configuration automatique au premier démarrage
 - Support de l’interface française et du clavier AZERTY
@@ -37,7 +38,10 @@ Le dépôt sert à construire une image ISO bootable pour x86_64, avec une confi
 - `rootfs/apps/gestionnaire-demarrage/` : gestionnaire de démarrage graphique
 - `rootfs/gestionnaire de mise à jour/` : centre de mise à jour
 - `rootfs/gestionnaire de sécurité/` : console de sécurité / pare-feu
+- `rootfs/usr/src/` : sources de ChatIA et des outils USB et mémoire
+- `rootfs/usr/assistance de migration/` : détection en lecture seule des systèmes installés sur les partitions
 - `src/nonoos-security.rs` : outil de supervision système en Rust
+- `.github/workflows/` et `docker/` : vérifications automatisées des composants
 
 ## Prérequis de compilation
 
@@ -56,6 +60,15 @@ sudo apt install \
 ```
 
 Le script vérifie aussi la présence de `lb`, `debootstrap`, `xorriso`, `mksquashfs`, `gcc`, `g++`, `make`, `depmod`, `nproc`, ainsi que le paquet Qt6Widgets.
+
+## Vérifications automatiques
+
+Deux workflows GitHub Actions vérifient les composants du dépôt sur Ubuntu :
+
+- `.github/workflows/ci.yml` vérifie la syntaxe des scripts shell de `rootfs/`, contrôle la syntaxe de tous les fichiers C++ de `rootfs/`, puis construit et exécute les tests de fumée Docker.
+- `.github/workflows/di.yml` compile séparément les trois applications graphiques Qt, compile le scanner Wi-Fi, vérifie le module mémoire, compile l’outil USB, vérifie la syntaxe des scripts shell et exécute les mêmes tests de fumée Docker.
+
+Ces workflows se déclenchent sur les push et pull requests vers `main` lorsqu’un fichier correspondant à leurs filtres est modifié. Ils peuvent aussi être lancés manuellement depuis l’onglet **Actions** de GitHub. Les tests Docker s’exécutent avec le réseau désactivé et vérifient notamment les réponses de ChatIA (salutation, calcul et détection USB) ainsi que les mesures RAM et CPU de l’outil mémoire.
 
 ## Génération de l’ISO
 
@@ -104,6 +117,17 @@ Au premier démarrage, le système peut proposer une configuration de langue, cl
 - `nonoos-dashboard` : tableau de bord système
 - `nonoos-create-test-user` : création d’un compte de test
 - `nonoos-test-shell` : vérification de l’environnement shell
+
+### Détection des systèmes installés
+
+Le module C++ `rootfs/usr/assistance de migration/detector.hpp` expose
+`detect_installed_os()`. Il inspecte les partitions Linux, LVM et chiffrées
+déjà déverrouillées, monte celles qui ne sont pas déjà montées en lecture seule,
+et reconnaît les installations Linux (`os-release`), Windows et macOS. Le
+résultat fournit les systèmes trouvés ainsi que les erreurs de partitions qui
+n’ont pas pu être inspectées. L’inventaire et le montage nécessitent les outils
+`lsblk` et les privilèges root ; les volumes chiffrés doivent être déverrouillés
+au préalable.
 
 ## Personnalisation
 
