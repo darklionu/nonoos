@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo "Cet assistant doit être exécuté en root." >&2
+    exit 1
+fi
+
+user_name=${1:-}
+if [[ -z "$user_name" ]] || ! id "$user_name" >/dev/null 2>&1; then
+    echo "Utilisateur de destination invalide : ${user_name:-<absent>}" >&2
+    exit 1
+fi
+
+destination=$(getent passwd "$user_name" | cut -d: -f6)
+if [[ -z "$destination" || ! -d "$destination" ]]; then
+    echo "Dossier personnel introuvable pour $user_name." >&2
+    exit 1
+fi
+
+state_dir=/var/lib/newdistrib
+log_file=/var/log/newdistrib-migration.log
+mkdir -p "$state_dir"
+: >> "$log_file"
+
+log() {
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$log_file"
+}
+
+say() {
+    printf '%s\n' "$*" >&2
+}
+
+choose_source() {
+    local -n result=$1
+    local -a labels=() mounts=() devices=()
+    local device type fstype mountpoint temp candidate source_user
+
+    while read -r device type fstype mountpoint; do
+        [[ "$type" == "part" || "$type" == "loop" ]] || continue
+        [[ -n "$device" ]] || continue
+        [[ "$mountpoint" == "-" ]] && mountpoint=""
+        [[ "$mountpoint" == "/" ]] && continue
+        temp=$(mktemp -d /run/nonoos-migration.XXXXXX)
+        if [[ -n "$mountpoint" ]]; then
+            findmnt --source "$device" --options ro >/dev/null 2>&1 || {
+                rmdir "$temp"
+                log "Partition montée en écriture ignorée : $device"
+                continue
+            }
+            candidate=$mountpoint
+            mounted_by_us=no
+        else
+            if ! mount --read-only "$device" "$temp" 2>>"$log_file"; then
+                rmdir "$temp"
+                continue
+            fi
+            candidate=$temp
+            mounted_by_us=yes
+        fi
+
+        source_user=""
+        for home in "$candidate"/home/*; do
+            if [[ -d "$home" ]]; then
+                source_user=${home##*/}
+                break
+            fi
+        done
+        if [[ -n "$source_user" ]]; then
+            labels+=("$device ($source_user)")
+            mounts+=("$candidate")
+            devices+=("$device")
+        fi
+
+        if [[ "$mounted_by_us" == yes ]]; then
+            umount "$temp" 2>>"$log_file" || true
+            rmdir "$temp"
+        fi
+    done < <(lsblk --noheadings --paths --list --output NAME,TYPE,FSTYPE,MOUNTPOINT 2>>"$log_file")
+
+    if ((${#labels[@]} == 0)); then
+        say "Aucune installation contenant un dossier /home n'a été détectée."
+        return 2
+    fi
+
+    local choice=0
+    if command -v whiptail >/dev/null 2>&1; then
+        local -a menu=()
+        for i in "${!labels[@]}"; do
+            menu+=("$i" "${labels[i]}")
+        done
+        choice=$(whiptail --title "Assistant de migration" \
+            --menu "Choisissez l'installation source :" 15 72 6 \
+            "${menu[@]}" 3>&1 1>&2 2>&3) || return 2
+    else
+        say "Installations détectées :"
+        for i in "${!labels[@]}"; do
+            say "  $((i + 1))) ${labels[i]}"
+        done
+        printf "Choix [1-%s] : " "${#labels[@]}" >&2
+        read -r choice
+        [[ "$choice" =~ ^[0-9]+$ ]] || return 2
+        choice=$((choice - 1))
+        ((choice >= 0 && choice < ${#labels[@]})) || return 2
+    fi
+
+    device=${devices[choice]}
+    mountpoint=$(findmnt --noheadings --output TARGET --source "$device" 2>/dev/null | head -n1 || true)
+    if [[ -n "$mountpoint" ]]; then
+        result_mount=$mountpoint
+        result_temp=no
+    else
+        result_mount=$(mktemp -d /run/nonoos-migration.XXXXXX)
+        if ! mount --read-only "$device" "$result_mount" 2>>"$log_file"; then
+            rmdir "$result_mount"
+            say "Impossible de monter $device en lecture seule."
+            return 1
+        fi
+        result_temp=yes
+    fi
+    result_device=$device
+}
+
+choose_categories() {
+    local -n result=$1
+    local categories=(Documents Images Videos Music Desktop Downloads)
+    local selected
+
+    if command -v whiptail >/dev/null 2>&1; then
+        selected=$(whiptail --title "Assistant de migration" --separate-output \
+            --checklist "Éléments à récupérer (aucun fichier existant ne sera écrasé) :" \
+            18 72 8 \
+            Documents "Documents" ON \
+            Images "Images" ON \
+            Videos "Vidéos" ON \
+            Music "Musique" ON \
+            Desktop "Bureau" ON \
+            Downloads "Téléchargements" ON \
+            3>&1 1>&2 2>&3) || return 2
+    else
+        say "Catégories : Documents Images Videos Music Desktop Downloads"
+        printf "Catégories séparées par des espaces (Entrée = toutes) : " >&2
+        read -r selected
+        selected=${selected:-"${categories[*]}"}
+    fi
+    result=$selected
+}
+
+cleanup_mount() {
+    if [[ "${result_temp:-no}" == yes ]]; then
+        umount "$result_mount" 2>>"$log_file" || log "Impossible de démonter $result_mount"
+        rmdir "$result_mount" 2>/dev/null || true
+    fi
+}
+trap cleanup_mount EXIT
+
+result_mount=""
+result_temp=no
+result_device=""
+if choose_source source; then
+    :
+else
+    status=$?
+    exit "$status"
+fi
+
+selected=""
+if choose_categories selected; then
+    :
+else
+    status=$?
+    exit "$status"
+fi
+
+source_home=""
+for home in "$result_mount"/home/*; do
+    if [[ -d "$home" ]]; then
+        source_home=$home
+        break
+    fi
+done
+if [[ -z "$source_home" ]]; then
+    say "Le dossier personnel source est introuvable."
+    exit 1
+fi
+
+copied=0
+failed=0
+for category in $selected; do
+    source_dir="$source_home/$category"
+    [[ -d "$source_dir" ]] || continue
+    mkdir -p "$destination/$category"
+    if cp -a --no-clobber "$source_dir/." "$destination/$category/" 2>>"$log_file"; then
+        copied=$((copied + 1))
+    else
+        failed=$((failed + 1))
+        say "Échec de récupération de $category (voir $log_file)."
+    fi
+done
+
+chown -R --reference="$destination" "$destination" 2>>"$log_file" || {
+    say "Impossible d'ajuster les droits du dossier récupéré (voir $log_file)."
+    exit 1
+}
+
+if ((failed > 0)); then
+    say "Migration partielle : $copied catégorie(s) récupérée(s), $failed en échec."
+    exit 1
+fi
+say "Récupération terminée : $copied catégorie(s) copiée(s) vers $destination."
+log "Migration terminée depuis $result_device vers $destination : $copied catégorie(s)."

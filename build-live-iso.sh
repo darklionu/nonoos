@@ -5,6 +5,21 @@ PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$PROJECT_DIR/dist"
 OUTPUT_ISO="$OUTPUT_DIR/nonoos-live-amd64.iso"
 KERNEL_SOURCE="$PROJECT_DIR/linux-7.2.6"
+TOTAL_STAGES=8
+
+progress() {
+    local stage="$1"
+    local message="$2"
+    local width=32
+    local filled=$((stage * width / TOTAL_STAGES))
+    local empty=$((width - filled))
+    local percent=$((stage * 100 / TOTAL_STAGES))
+    printf '\n[%3d%%] [%s%s] %s\n' \
+        "$percent" \
+        "$(printf '%*s' "$filled" '' | tr ' ' '#')" \
+        "$(printf '%*s' "$empty" '')" \
+        "$message" >&2
+}
 
 if [[ "$EUID" -ne 0 ]]; then
     echo "Lancez ce script avec sudo : sudo bash $0" >&2
@@ -36,9 +51,11 @@ if ! pkg-config --exists Qt6Widgets; then
     exit 1
 fi
 
+progress 1 "Préparation de l'environnement de construction"
 BUILD_DIR="$(mktemp -d "${TMPDIR:-/var/tmp}/nonoos-live.XXXXXX")"
 trap 'rm -rf -- "$BUILD_DIR"' EXIT
 
+progress 2 "Compilation des outils personnalisés"
 g++ -std=c++17 -Wall -Wextra -pedantic \
     "$PROJECT_DIR/rootfs/gestionnaire de mise à jour/interface_graphique.cpp" \
     $(pkg-config --cflags --libs Qt6Widgets) \
@@ -61,33 +78,60 @@ KERNEL_BUILD_DIR="$BUILD_DIR/kernel-build"
 KERNEL_STAGE="$BUILD_DIR/kernel-stage"
 KERNEL_RELEASE=""
 
+progress 3 "Configuration du noyau Linux"
 mkdir -p "$KERNEL_BUILD_DIR"
 make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" x86_64_defconfig
 "$KERNEL_SOURCE/scripts/config" --file "$KERNEL_BUILD_DIR/.config" \
     --set-str LOCALVERSION "-nonoos" \
     --disable LOCALVERSION_AUTO \
     --enable BLK_DEV_INITRD \
-    --module BLK_DEV_LOOP \
-    --module EXT4_FS \
-    --module ISO9660_FS \
-    --module OVERLAY_FS \
-    --module SQUASHFS \
-    --module VIRTIO \
-    --module VIRTIO_BLK \
-    --module VIRTIO_NET \
-    --module VIRTIO_PCI
+    --enable BLK_DEV_LOOP \
+    --enable EXT4_FS \
+    --enable ISO9660_FS \
+    --enable OVERLAY_FS \
+    --enable SQUASHFS \
+    --enable VIRTIO \
+    --enable VIRTIO_BLK \
+    --enable VIRTIO_NET \
+    --enable VIRTIO_PCI
 make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" olddefconfig
+for required_config in \
+    CONFIG_BLK_DEV_INITRD \
+    CONFIG_BLK_DEV_LOOP \
+    CONFIG_EXT4_FS \
+    CONFIG_ISO9660_FS \
+    CONFIG_OVERLAY_FS \
+    CONFIG_SQUASHFS \
+    CONFIG_VIRTIO \
+    CONFIG_VIRTIO_BLK \
+    CONFIG_VIRTIO_NET \
+    CONFIG_VIRTIO_PCI
+do
+    if ! grep -q "^${required_config}=y$" "$KERNEL_BUILD_DIR/.config"; then
+        echo "Configuration noyau requise absente ou non intégrée : $required_config" >&2
+        exit 1
+    fi
+done
+
+progress 4 "Compilation du noyau Linux et de ses modules"
 make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" -j"$(nproc)" bzImage modules
 KERNEL_RELEASE="$(make -s -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" kernelrelease)"
 make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" \
     INSTALL_MOD_PATH="$KERNEL_STAGE" modules_install
 
+progress 5 "Configuration de l'image live Debian"
 cd "$BUILD_DIR"
 lb config \
     --distribution trixie \
     --architectures amd64 \
     --binary-images iso-hybrid \
-    --bootloaders "grub-pc grub-efi" \
+    --bootloader grub \
+    --mirror-bootstrap "http://deb.debian.org/debian" \
+    --mirror-chroot "http://deb.debian.org/debian" \
+    --mirror-chroot-security "http://security.debian.org/debian-security" \
+    --mirror-binary "http://deb.debian.org/debian" \
+    --mirror-binary-security "http://security.debian.org/debian-security" \
+    --keyring-packages "debian-archive-keyring" \
     --linux-packages none \
     --archive-areas "main contrib non-free non-free-firmware" \
     --debian-installer live \
@@ -95,7 +139,7 @@ lb config \
     --iso-application "nonoos" \
     --iso-publisher "nonoos" \
     --iso-volume "NONOOS" \
-    --bootappend-live "boot=live components locales=fr_FR.UTF-8 keyboard-layouts=fr username=nonoos hostname=nonoos"
+    --bootappend-live "boot=live components persistence console=ttyS0,115200n8 locales=fr_FR.UTF-8 keyboard-layouts=fr username=nonoos hostname=nonoos"
 
 mkdir -p config/package-lists config/includes.chroot
 cat > config/package-lists/newdistrib.list.chroot <<'EOF'
@@ -127,8 +171,11 @@ iproute2
 flatpak
 ufw
 bubblewrap
+e2fsprogs
+util-linux
 EOF
 
+progress 6 "Installation des fichiers NonoOS dans l'image"
 cp -a "$PROJECT_DIR/rootfs/." config/includes.chroot/
 install -D -m 0755 "$BUILD_DIR/nonoos-software-center" \
     config/includes.chroot/usr/bin/nonoos-software-center
@@ -170,6 +217,7 @@ ln -sfn ../newdistrib-first-boot.service \
 ln -sfn ../newdistrib-every-boot.service \
     config/includes.chroot/etc/systemd/system/multi-user.target.wants/newdistrib-every-boot.service
 
+progress 7 "Construction de l'image ISO (live-build)"
 lb build
 
 ISO_PATH="$BUILD_DIR/live-image-amd64.hybrid.iso"
@@ -178,6 +226,7 @@ if [[ ! -s "$ISO_PATH" ]]; then
     exit 1
 fi
 
+progress 8 "Finalisation de l'image ISO"
 install -D -m 0644 "$ISO_PATH" "$OUTPUT_ISO"
 if [[ -n "${SUDO_USER:-}" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
     chown "$SUDO_USER" "$OUTPUT_ISO"

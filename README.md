@@ -18,6 +18,7 @@ Le dépôt sert à construire une image ISO bootable pour x86_64, avec une confi
   - assistant ChatIA, scanner Wi-Fi et outils de diagnostic USB et mémoire
   - scripts de création d’utilisateur et de tests
 - Configuration automatique au premier démarrage
+- Persistance live optionnelle sur une partition dédiée
 - Support de l’interface française et du clavier AZERTY
 
 ## Vue d’ensemble du projet
@@ -40,6 +41,7 @@ Le dépôt sert à construire une image ISO bootable pour x86_64, avec une confi
 - `rootfs/gestionnaire de sécurité/` : console de sécurité / pare-feu
 - `rootfs/usr/src/` : sources de ChatIA et des outils USB et mémoire
 - `rootfs/usr/assistance de migration/` : détection en lecture seule des systèmes installés sur les partitions
+- `rootfs/usr/local/sbin/nonoos-migration-assistant` : récupération facultative des dossiers personnels proposée au premier démarrage
 - `src/nonoos-security.rs` : outil de supervision système en Rust
 - `.github/workflows/` et `docker/` : vérifications automatisées des composants
 
@@ -56,7 +58,7 @@ sudo apt install \
   grub-pc-bin grub-efi-amd64-bin mtools dosfstools \
   build-essential bc bison flex libelf-dev libssl-dev \
   openssl perl python3 rustc kmod qt6-base-dev \
-  pkg-config
+  pkg-config qemu-system-x86
 ```
 
 Le script vérifie aussi la présence de `lb`, `debootstrap`, `xorriso`, `mksquashfs`, `gcc`, `g++`, `make`, `depmod`, `nproc`, ainsi que le paquet Qt6Widgets.
@@ -78,6 +80,9 @@ Depuis la racine du dépôt :
 sudo ./build-live-iso.sh
 ```
 
+Le script affiche une barre de progression par grandes étapes tout en
+conservant les journaux détaillés de compilation.
+
 Le script :
 
 1. compile les outils Qt et Rust personnalisés,
@@ -92,13 +97,61 @@ La sortie est générée dans :
 dist/nonoos-live-amd64.iso
 ```
 
+### Test de démarrage avec QEMU
+
+Après la construction de l’ISO, vérifiez son démarrage sans machine virtuelle
+graphique :
+
+```bash
+./tests/qemu-boot.sh
+```
+
+Le script démarre l’ISO avec un disque virtuel, une carte réseau VirtIO et une
+console série. Il surveille les erreurs critiques du noyau et de l’initramfs,
+puis arrête automatiquement QEMU après 90 secondes. Une autre ISO peut être
+testée en la donnant comme argument :
+
+```bash
+./tests/qemu-boot.sh /chemin/vers/nonoos-live-amd64.iso
+```
+
+La mémoire, le nombre de processeurs et le délai peuvent être ajustés avec
+`QEMU_MEMORY_MB`, `QEMU_CPUS` et `QEMU_TIMEOUT_SECONDS`.
+
 ## Utilisation
 
 ### Démarrage
 
 - gravez l’image ISO sur un support USB,
 - ou exécutez-la depuis un environnement de virtualisation compatible (QEMU, VirtualBox, VMware, etc.),
-- choisissez le système bootable et lancez le live session.
+- choisissez le système bootable et lancez la session live.
+
+### Persistance de la session live
+
+L’ISO est construite avec le support `live-boot` et demande automatiquement
+une couche de persistance grâce à l’option de démarrage `persistence`. Pour
+conserver les fichiers et les réglages entre deux démarrages, préparez une
+partition dédiée depuis la session live :
+
+```bash
+sudo nonoos-create-persistence /dev/sdX3
+```
+
+Remplacez `/dev/sdX3` par la partition destinée à la persistance. Cette
+commande formate entièrement la partition en ext4 : vérifiez impérativement
+le périphérique avant de confirmer. Pour une utilisation non interactive,
+l’option destructive doit être explicite :
+
+```bash
+sudo nonoos-create-persistence --yes /dev/sdX3
+```
+
+La partition reçoit le label `persistence` et le fichier de configuration
+`/persistence.conf` avec la règle `/ union`. Elle doit être séparée du support
+contenant l’ISO. Le script refuse une partition déjà montée.
+
+Pour désactiver la persistance lors d’un démarrage ponctuel, éditez les
+paramètres de démarrage et retirez `persistence`.
 
 ### Configuration initiale
 
@@ -128,6 +181,14 @@ résultat fournit les systèmes trouvés ainsi que les erreurs de partitions qui
 n’ont pas pu être inspectées. L’inventaire et le montage nécessitent les outils
 `lsblk` et les privilèges root ; les volumes chiffrés doivent être déverrouillés
 au préalable.
+
+Après la création du compte principal, le premier démarrage propose aussi de
+récupérer `Documents`, `Images`, `Videos`, `Music`, `Desktop` et `Downloads`
+depuis une installation contenant un dossier `/home`. La source est montée en
+lecture seule lorsqu’elle ne l’est pas déjà, les fichiers existants ne sont pas
+écrasés et les erreurs sont consignées dans
+`/var/log/newdistrib-migration.log`. Cette étape peut être annulée sans bloquer
+la suite de la configuration.
 
 ## Personnalisation
 

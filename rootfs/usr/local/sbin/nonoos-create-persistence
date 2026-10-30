@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: nonoos-create-persistence [--yes] DEVICE
+
+Prepare une partition dédiée à la persistance de la session live NonoOS.
+ATTENTION : la partition DEVICE sera entièrement effacée.
+EOF
+}
+
+confirm=false
+device=""
+
+while (($# > 0)); do
+    case "$1" in
+        --yes)
+            confirm=true
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            if (($# != 1)); then
+                usage
+                exit 2
+            fi
+            device=$1
+            break
+            ;;
+        -*)
+            echo "Option inconnue : $1" >&2
+            usage
+            exit 2
+            ;;
+        *)
+            if [[ -n "$device" ]]; then
+                echo "Une seule partition doit être indiquée." >&2
+                usage
+                exit 2
+            fi
+            device=$1
+            ;;
+    esac
+    shift
+done
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo "Ce script doit être exécuté en root." >&2
+    exit 1
+fi
+
+if [[ -z "$device" || ! -b "$device" ]]; then
+    echo "Périphérique bloc invalide : ${device:-<absent>}" >&2
+    usage
+    exit 2
+fi
+
+device_type=$(lsblk --noheadings --nodeps --output TYPE "$device")
+if [[ "$device_type" != "part" && "$device_type" != "loop" ]]; then
+    echo "Le périphérique doit être une partition dédiée (type trouvé : ${device_type:-inconnu})." >&2
+    exit 1
+fi
+
+if findmnt --source "$device" >/dev/null 2>&1; then
+    echo "La partition est actuellement montée : $device" >&2
+    echo "Démontez-la avant de continuer." >&2
+    exit 1
+fi
+
+if [[ "$confirm" != true ]]; then
+    if [[ ! -t 0 ]]; then
+        echo "La confirmation interactive est impossible. Utilisez --yes explicitement." >&2
+        exit 2
+    fi
+    printf 'La partition %s sera entièrement effacée. Continuer ? [oui/non] ' "$device" >&2
+    read -r answer
+    if [[ "$answer" != "oui" ]]; then
+        echo "Opération annulée." >&2
+        exit 1
+    fi
+fi
+
+wipefs --all "$device"
+mkfs.ext4 -L persistence "$device"
+
+mountpoint=$(mktemp -d /run/nonoos-persistence.XXXXXX)
+cleanup() {
+    if mountpoint "$mountpoint" >/dev/null 2>&1; then
+        umount "$mountpoint" || true
+    fi
+    rmdir "$mountpoint" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+mount "$device" "$mountpoint"
+printf '/ union\n' > "$mountpoint/persistence.conf"
+sync
+
+echo "Persistance configurée sur $device."
+echo "Ajoutez l'option 'persistence' aux paramètres du démarrage live si nécessaire."

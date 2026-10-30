@@ -1272,6 +1272,24 @@ else
     fi
 fi
 
+# Proposer la récupération des fichiers de l'ancienne installation avant de
+# terminer la configuration de NonoOS.
+if [ "$FIRST_BOOT_FAILED" = no ] && command -v nonoos-migration-assistant >/dev/null 2>&1; then
+    if ui_yesno "$TITLE" \
+        "Voulez-vous récupérer maintenant vos fichiers personnels depuis une ancienne installation ?\n\nLa source sera ouverte en lecture seule et les fichiers existants ne seront pas écrasés."
+    then
+        if nonoos-migration-assistant "$USER_NAME"; then
+            ui_msg "$TITLE" "Récupération des fichiers terminée." "Continuer"
+        else
+            migration_rc=$?
+            if [ "$migration_rc" -ne 2 ]; then
+                record_failure "La récupération des fichiers a échoué. Consultez /var/log/newdistrib-migration.log."
+                ui_msg "$TITLE" "La récupération des fichiers a échoué.\n\nLa configuration continue, mais consultez /var/log/newdistrib-migration.log." "Continuer"
+            fi
+        fi
+    fi
+fi
+
 # Activation des services système sélectionnés.
 if ! enable_ssh_service; then
     record_failure "Activation du service SSH échouée."
