@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+shopt -s nullglob
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$PROJECT_DIR/dist"
 OUTPUT_ISO="$OUTPUT_DIR/nonoos-live-amd64.iso"
 KERNEL_SOURCE="$PROJECT_DIR/linux-7.2.6"
-TOTAL_STAGES=8
+BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/.build/nonoos-live}"
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://deb.debian.org/debian}"
+APT_HTTP_PROXY="${APT_HTTP_PROXY:-}"
+TOTAL_STAGES=9
 
 progress() {
     local stage="$1"
@@ -45,6 +49,17 @@ if (("${#missing[@]}" > 0)); then
     exit 1
 fi
 
+for required_file in \
+    /usr/include/gelf.h \
+    /usr/share/keyrings/debian-archive-keyring.gpg
+do
+    if [[ ! -r "$required_file" ]]; then
+        echo "Fichier requis introuvable : $required_file" >&2
+        echo "Installez libelf-dev et debian-archive-keyring sur l'hôte." >&2
+        exit 1
+    fi
+done
+
 if ! pkg-config --exists Qt6Widgets; then
     echo "Qt 6 Widgets est introuvable via pkg-config." >&2
     echo "Installez le paquet qt6-base-dev sur l’hôte de construction." >&2
@@ -52,12 +67,11 @@ if ! pkg-config --exists Qt6Widgets; then
 fi
 
 progress 1 "Préparation de l'environnement de construction"
-BUILD_DIR="$(mktemp -d "${TMPDIR:-/var/tmp}/nonoos-live.XXXXXX")"
-trap 'rm -rf -- "$BUILD_DIR"' EXIT
+mkdir -p "$BUILD_DIR"
 
 progress 2 "Compilation des outils personnalisés"
 g++ -std=c++17 -Wall -Wextra -pedantic \
-    "$PROJECT_DIR/rootfs/gestionnaire de mise à jour/interface_graphique.cpp" \
+    "$PROJECT_DIR/rootfs/update-center/interface_graphique.cpp" \
     $(pkg-config --cflags --libs Qt6Widgets) \
     -o "$BUILD_DIR/nonoos-software-center"
 
@@ -121,25 +135,32 @@ make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" \
 
 progress 5 "Configuration de l'image live Debian"
 cd "$BUILD_DIR"
-lb config \
-    --distribution trixie \
-    --architectures amd64 \
-    --binary-images iso-hybrid \
-    --bootloader grub \
-    --mirror-bootstrap "http://deb.debian.org/debian" \
-    --mirror-chroot "http://deb.debian.org/debian" \
-    --mirror-chroot-security "http://security.debian.org/debian-security" \
-    --mirror-binary "http://deb.debian.org/debian" \
-    --mirror-binary-security "http://security.debian.org/debian-security" \
-    --keyring-packages "debian-archive-keyring" \
-    --linux-packages none \
-    --archive-areas "main contrib non-free non-free-firmware" \
-    --debian-installer live \
-    --debian-installer-gui true \
-    --iso-application "nonoos" \
-    --iso-publisher "nonoos" \
-    --iso-volume "NONOOS" \
+lb_config_args=(
+    --distribution trixie
+    --architectures amd64
+    --mode debian
+    --binary-images iso-hybrid
+    --bootloader syslinux
+    --syslinux-theme live-build
+    --initramfs live-boot
+    --initsystem systemd
+    --mirror-bootstrap "$DEBIAN_MIRROR"
+    --mirror-chroot "$DEBIAN_MIRROR"
+    --mirror-binary "$DEBIAN_MIRROR"
+    --keyring-packages "debian-archive-keyring"
+    --security false
+    --linux-packages none
+    --archive-areas "main contrib non-free non-free-firmware"
+    --debian-installer false
+    --iso-application "nonoos"
+    --iso-publisher "nonoos"
+    --iso-volume "NONOOS"
     --bootappend-live "boot=live components persistence console=ttyS0,115200n8 locales=fr_FR.UTF-8 keyboard-layouts=fr username=nonoos hostname=nonoos"
+)
+if [[ -n "$APT_HTTP_PROXY" ]]; then
+    lb_config_args+=(--apt-http-proxy "$APT_HTTP_PROXY")
+fi
+lb config "${lb_config_args[@]}"
 
 mkdir -p config/package-lists config/includes.chroot
 cat > config/package-lists/newdistrib.list.chroot <<'EOF'
@@ -147,6 +168,7 @@ live-boot
 initramfs-tools
 live-config
 systemd-sysv
+isolinux
 network-manager
 wpasupplicant
 whiptail
@@ -174,6 +196,12 @@ bubblewrap
 e2fsprogs
 util-linux
 EOF
+
+mkdir -p config/includes.chroot/usr/lib/syslinux
+ln -sfn /usr/lib/ISOLINUX/isolinux.bin \
+    config/includes.chroot/usr/lib/syslinux/isolinux.bin
+ln -sfn /usr/lib/syslinux/modules/bios/vesamenu.c32 \
+    config/includes.chroot/usr/lib/syslinux/vesamenu.c32
 
 progress 6 "Installation des fichiers NonoOS dans l'image"
 cp -a "$PROJECT_DIR/rootfs/." config/includes.chroot/
@@ -211,14 +239,84 @@ test -s "/boot/initrd.img-$KERNEL_RELEASE"
 EOF
 chmod 0755 config/hooks/live/9999-nonoos-initramfs.hook.chroot
 
+mkdir -p config/hooks
+cat > config/hooks/0000-nonoos-network.chroot_early <<'EOF'
+#!/bin/sh
+set -eu
+
+mkdir -p /etc/apt/apt.conf.d
+cat > /etc/apt/apt.conf.d/99nonoos-network <<'APT_CONF'
+Acquire::ForceIPv4 "true";
+APT_CONF
+EOF
+chmod 0755 config/hooks/0000-nonoos-network.chroot_early
+
 mkdir -p config/includes.chroot/etc/systemd/system/multi-user.target.wants
 ln -sfn ../newdistrib-first-boot.service \
     config/includes.chroot/etc/systemd/system/multi-user.target.wants/newdistrib-first-boot.service
 ln -sfn ../newdistrib-every-boot.service \
     config/includes.chroot/etc/systemd/system/multi-user.target.wants/newdistrib-every-boot.service
 
-progress 7 "Construction de l'image ISO (live-build)"
-lb build
+progress 7 "Préparation du système Debian et de l'image live"
+lb bootstrap
+
+host_nameservers=()
+while read -r nameserver; do
+    host_nameservers+=("$nameserver")
+done < <(awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf)
+if ((${#host_nameservers[@]} == 0)); then
+    echo "Aucun serveur DNS trouvé dans /etc/resolv.conf." >&2
+    exit 1
+fi
+
+rm -f chroot/etc/resolv.conf
+{
+    for nameserver in "${host_nameservers[@]}"; do
+        printf 'nameserver %s\n' "$nameserver"
+    done
+    printf 'options timeout:3 attempts:5\n'
+} > chroot/etc/resolv.conf
+
+lb chroot_hosts install
+mirror_host="${DEBIAN_MIRROR#*://}"
+mirror_host="${mirror_host%%/*}"
+mirror_addresses="$(getent ahostsv4 "$mirror_host" | awk '!seen[$1]++ { print $1 }')"
+if [[ -z "$mirror_addresses" ]]; then
+    echo "Impossible de résoudre $mirror_host sur l'hôte." >&2
+    exit 1
+fi
+while IFS= read -r address; do
+    printf '%s\t%s\n' "$address" "$mirror_host" >> chroot/etc/hosts
+done <<< "$mirror_addresses"
+mkdir -p chroot/etc/apt/apt.conf.d
+cat > chroot/etc/apt/apt.conf.d/99nonoos-network <<'EOF'
+Acquire::ForceIPv4 "true";
+EOF
+
+lb chroot
+
+if ! chroot "$BUILD_DIR/chroot" dpkg-query -W -f='${Status}' initramfs-tools 2>/dev/null |
+    grep -q '^install ok installed$'
+then
+    chroot "$BUILD_DIR/chroot" apt-get --yes install initramfs-tools
+fi
+
+chroot "$BUILD_DIR/chroot" depmod -a "$KERNEL_RELEASE"
+chroot "$BUILD_DIR/chroot" update-initramfs -c -k "$KERNEL_RELEASE"
+
+mkdir -p binary/live
+kernel_files=(chroot/boot/vmlinuz-"$KERNEL_RELEASE")
+initramfs_files=(chroot/boot/initrd.img-"$KERNEL_RELEASE")
+if ((${#kernel_files[@]} != 1 || ${#initramfs_files[@]} != 1)); then
+    echo "Noyau ou initramfs personnalisé introuvable dans chroot/boot." >&2
+    printf 'Noyau : %s\n' "${kernel_files[*]:-absent}" >&2
+    printf 'Initramfs : %s\n' "${initramfs_files[*]:-absent}" >&2
+    exit 1
+fi
+cp -a "${kernel_files[0]}" "${initramfs_files[0]}" binary/live/
+
+progress 8 "Construction de l'image ISO (live-build)"
+lb binary
 
 ISO_PATH="$BUILD_DIR/live-image-amd64.hybrid.iso"
 if [[ ! -s "$ISO_PATH" ]]; then
@@ -226,7 +324,7 @@ if [[ ! -s "$ISO_PATH" ]]; then
     exit 1
 fi
 
-progress 8 "Finalisation de l'image ISO"
+progress 9 "Finalisation de l'image ISO"
 install -D -m 0644 "$ISO_PATH" "$OUTPUT_ISO"
 if [[ -n "${SUDO_USER:-}" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
     chown "$SUDO_USER" "$OUTPUT_ISO"

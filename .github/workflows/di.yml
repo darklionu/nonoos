@@ -93,7 +93,7 @@ jobs:
       - name: Compiler le gestionnaire de mise à jour
         run: |
           g++ -std=c++17 -Wall -Wextra -pedantic \
-            "rootfs/gestionnaire de mise à jour/interface_graphique.cpp" \
+            "rootfs/update-center/interface_graphique.cpp" \
             $(pkg-config --cflags --libs Qt6Widgets) \
             -o /tmp/nonoos-software-center
 
@@ -124,7 +124,7 @@ jobs:
             -fsyntax-only rootfs/usr/src/memory/ram_memory.cpp
 
   compileria:
-    name: Compiler et tester ChatIA
+    name: Compiler et tester ChatIA.&
     runs-on: ubuntu-latest
     steps:
       - name: Récupérer le dépôt

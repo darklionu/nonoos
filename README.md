@@ -37,10 +37,10 @@ Le dépôt sert à construire une image ISO bootable pour x86_64, avec une confi
 - `rootfs/etc/init.d/first-boot` : configuration initiale du système
 - `rootfs/etc/init.d/every-boot` : tâches de maintenance à chaque démarrage
 - `rootfs/apps/gestionnaire-demarrage/` : gestionnaire de démarrage graphique
-- `rootfs/gestionnaire de mise à jour/` : centre de mise à jour
+- `rootfs/update-center/` : centre de mise à jour
 - `rootfs/gestionnaire de sécurité/` : console de sécurité / pare-feu
 - `rootfs/usr/src/` : sources de ChatIA et des outils USB et mémoire
-- `rootfs/usr/assistance de migration/` : détection en lecture seule des systèmes installés sur les partitions
+- `rootfs/usr/migration-assistant/` : détection en lecture seule des systèmes installés sur les partitions
 - `rootfs/usr/local/sbin/nonoos-migration-assistant` : récupération facultative des dossiers personnels proposée au premier démarrage
 - `src/nonoos-security.rs` : outil de supervision système en Rust
 - `.github/workflows/` et `docker/` : vérifications automatisées des composants
@@ -81,7 +81,22 @@ sudo ./build-live-iso.sh
 ```
 
 Le script affiche une barre de progression par grandes étapes tout en
-conservant les journaux détaillés de compilation.
+conservant les journaux détaillés de compilation. Le répertoire
+`.build/nonoos-live/` est conservé entre les exécutions afin de reprendre les
+étapes déjà réussies ; utilisez `BUILD_DIR=/chemin/personnalise` pour changer
+son emplacement.
+
+Le miroir Debian et le proxy APT peuvent être adaptés à un réseau local ou à
+un cache déjà disponible :
+
+```bash
+sudo DEBIAN_MIRROR=http://miroir-local/debian \
+  APT_HTTP_PROXY=http://proxy-local:3142 \
+  ./build-live-iso.sh
+```
+
+Le proxy est facultatif. Un accès réseau au miroir reste nécessaire si les
+paquets ne sont pas déjà disponibles dans le cache de live-build.
 
 Le script :
 
@@ -173,7 +188,7 @@ Au premier démarrage, le système peut proposer une configuration de langue, cl
 
 ### Détection des systèmes installés
 
-Le module C++ `rootfs/usr/assistance de migration/detector.hpp` expose
+Le module C++ `rootfs/usr/migration-assistant/detector.hpp` expose
 `detect_installed_os()`. Il inspecte les partitions Linux, LVM et chiffrées
 déjà déverrouillées, monte celles qui ne sont pas déjà montées en lecture seule,
 et reconnaît les installations Linux (`os-release`), Windows et macOS. Le

@@ -95,8 +95,8 @@ possible avec :
 
 ```sh
 g++ -std=c++17 -Wall -Wextra -pedantic -fsyntax-only \
-  "rootfs/usr/assistance de migration/detector.cpp" \
-  "rootfs/usr/assistance de migration/extension_filter.cpp"
+  "rootfs/usr/migration-assistant/detector.cpp" \
+  "rootfs/usr/migration-assistant/extension_filter.cpp"
 ```
 
 `lsblk` doit être disponible. Les montages temporaires nécessitent les

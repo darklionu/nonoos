@@ -68,4 +68,4 @@ jobs:
       - name: Construire les composants et exécuter les tests de fumée
         run: |
           docker build --file docker/Dockerfile --tag nonoos-rootfs-tests .
-          docker run --rm --network none nonoos-rootfs-tests
+          docker run --rm --network none nonoos-rootfs-test

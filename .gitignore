@@ -1,5 +1,6 @@
 # Generated images and locally compiled programs
 /dist/
+/.build/
 /ram_memory
 /chatia
 /chatia-gui

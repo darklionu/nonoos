@@ -1,4 +1,4 @@
-#include <ram_memory.h>
+#include "../usr/src/memory/ram_memory.h"
 #include <QApplication>
 #include <QHeaderView>
 #include <QLabel>
