@@ -5,7 +5,7 @@ shopt -s nullglob
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$PROJECT_DIR/dist"
 OUTPUT_ISO="$OUTPUT_DIR/nonoos-live-amd64.iso"
-KERNEL_SOURCE="$PROJECT_DIR/linux-7.2.6"
+KERNEL_SOURCE="$PROJECT_DIR/linux-6.18"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/.build/nonoos-live}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://deb.debian.org/debian}"
 APT_HTTP_PROXY="${APT_HTTP_PROXY:-}"

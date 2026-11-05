@@ -1,13 +1,13 @@
 # NONOOS
 
-NonoOS est une distribution Linux live basée sur Debian et optimisée pour les environnements de bureau, la gestion système et la sécurité. Le projet combine un noyau Linux 7.2.6, un système de live build Debian/Ubuntu, un environnement graphique KDE Plasma et des outils personnalisés pour administrer le système, gérer les mises à jour et sécuriser l’installation.
+NonoOS est une distribution Linux live basée sur Debian et optimisée pour les environnements de bureau, la gestion système et la sécurité. Le projet combine un noyau Linux 6.18, un système de live build Debian/Ubuntu, un environnement graphique KDE Plasma et des outils personnalisés pour administrer le système, gérer les mises à jour et sécuriser l’installation.
 
 Le dépôt sert à construire une image ISO bootable pour x86_64, avec une configuration par défaut en français, des outils de maintenance intégrés et une base système prête à personnaliser.
 
 ## Fonctionnalités principales
 
 - ISO live amd64 construite automatiquement
-- Noyau Linux 7.2.6 avec modules standards pour le stockage, le réseau et le boot live
+- Noyau Linux 6.18 avec modules standards pour le stockage, le réseau et le boot live
 - Base Debian trixie avec KDE Plasma, SDDM, NetworkManager, sudo et outils système
 - Outils personnalisés :
   - gestionnaire de démarrage
@@ -23,10 +23,38 @@ Le dépôt sert à construire une image ISO bootable pour x86_64, avec une confi
 
 ## Vue d’ensemble du projet
 
+### Diagramme architectural
+
+```mermaid
+flowchart LR
+    A[build-live-iso.sh] --> B[Live build / Debian base]
+    A --> C[linux-6.18]
+    C --> D[Noyau personnalisé x86_64]
+    B --> E[rootfs/]
+    E --> F[Desktop KDE Plasma]
+    E --> G[Outils système / sécurité / maintenance]
+    E --> H[Scripts de premier boot]
+    D --> I[ISO hybride final]
+    E --> I
+    I --> J[USB / VM / machine cible]
+    J --> K[Session live NONOOS]
+    K --> L[Configuration initiale]
+    K --> M[Gestionnaire de démarrage]
+    K --> N[Centre de sécurité / mises à jour]
+    K --> O[Applications Qt et outils Rust]
+
+    subgraph "Composants" 
+        F
+        G
+        H
+        O
+    end
+```
+
 ### Structure du dépôt
 
 - `build-live-iso.sh` : script principal de génération de l’image ISO
-- `linux-7.2.6/` : sources du noyau Linux 7.2.6
+- `linux-6.18/` : sources du noyau Linux 6.18
 - `rootfs/` : fichiers du système live et outils personnalisés
 - `src/` : composants logiciels complémentaires (ex. Rust pour la sécurité)
 - `docker/` : outils de conteneurisation/tests
@@ -101,7 +129,7 @@ paquets ne sont pas déjà disponibles dans le cache de live-build.
 Le script :
 
 1. compile les outils Qt et Rust personnalisés,
-2. configure le noyau Linux 7.2.6 pour x86_64,
+2. configure le noyau Linux 6.18 pour x86_64,
 3. crée un environnement live Debian,
 4. injecte le contenu de `rootfs/`,
 5. construit l’ISO hybride final.

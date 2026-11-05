@@ -1,6 +1,0 @@
-NAME=nonoos
-PRETTY_NAME=nonoos
-ID=nonoos
-ID_LIKE=debian
-VERSION="Live"
-VERSION_ID="1"
