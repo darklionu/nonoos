@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: nonoos-power <commande>
+
+Commandes:
+  status                 Afficher l'état d'alimentation
+  profile <mode>         Choisir balanced, performance ou power-saver
+  run [options] -- cmd    Lancer une tâche avec des limites de ressources
+  suspend                Mettre le système en veille
+  hibernate              Mettre le système en hibernation
+  reboot                 Redémarrer le système
+  poweroff               Éteindre le système
+EOF
+}
+
+run_task() {
+    local cpu_quota="" memory_max="" nice_level="" arg
+    local -a command_args=()
+
+    while (($# > 0)); do
+        case "$1" in
+            --cpu-quota)
+                [[ $# -ge 2 ]] || { printf 'Erreur : --cpu-quota attend une valeur.\n' >&2; exit 2; }
+                cpu_quota=$2
+                shift 2
+                ;;
+            --memory-max)
+                [[ $# -ge 2 ]] || { printf 'Erreur : --memory-max attend une valeur.\n' >&2; exit 2; }
+                memory_max=$2
+                shift 2
+                ;;
+            --nice)
+                [[ $# -ge 2 ]] || { printf 'Erreur : --nice attend une valeur.\n' >&2; exit 2; }
+                nice_level=$2
+                shift 2
+                ;;
+            --)
+                shift
+                command_args=("$@")
+                break
+                ;;
+            *)
+                printf 'Erreur : option run inconnue : %s\n' "$1" >&2
+                exit 2
+                ;;
+        esac
+    done
+
+    ((${#command_args[@]} > 0)) || {
+        printf 'Erreur : indiquez une commande après --.\n' >&2
+        exit 2
+    }
+    if [[ -n "$cpu_quota" && ! "$cpu_quota" =~ ^([1-9][0-9]?|100)%$ ]]; then
+        printf 'Erreur : --cpu-quota doit être compris entre 1%% et 100%%.\n' >&2
+        exit 2
+    fi
+    if [[ -n "$nice_level" && ! "$nice_level" =~ ^-?[0-9]+$ ]] ||
+        [[ -n "$nice_level" && (nice_level < -20 || nice_level > 19) ]]; then
+        printf 'Erreur : --nice doit être compris entre -20 et 19.\n' >&2
+        exit 2
+    fi
+
+    require_command systemd-run
+    local -a properties=(--property=KillMode=control-group)
+    [[ -n "$cpu_quota" ]] && properties+=(--property="CPUQuota=$cpu_quota")
+    [[ -n "$memory_max" ]] && properties+=(--property="MemoryMax=$memory_max")
+    [[ -n "$nice_level" ]] && properties+=(--property="Nice=$nice_level")
+
+    if ! systemd-run --user --scope --quiet "${properties[@]}" \
+        "${command_args[@]}"; then
+        printf 'Erreur : impossible de lancer la tâche limitée.\n' >&2
+        exit 1
+    fi
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || {
+        printf 'Erreur : commande requise introuvable : %s\n' "$1" >&2
+        exit 1
+    }
+}
+
+read_first_file() {
+    local file
+    for file in "$@"; do
+        if [[ -r "$file" ]]; then
+            cat "$file"
+            return 0
+        fi
+    done
+    return 1
+}
+
+show_battery() {
+    local battery status capacity
+    for battery in /sys/class/power_supply/BAT*; do
+        [[ -d "$battery" ]] || continue
+        status=$(read_first_file "$battery/status" || printf 'inconnu')
+        capacity=$(read_first_file "$battery/capacity" || printf 'inconnu')
+        printf 'Batterie %s : %s, %s%%\n' "${battery##*/}" "$status" "$capacity"
+    done
+}
+
+show_ac() {
+    local supply online
+    for supply in /sys/class/power_supply/AC* \
+        /sys/class/power_supply/ADP* \
+        /sys/class/power_supply/USB*; do
+        [[ -d "$supply" && -r "$supply/online" ]] || continue
+        online=$(read_first_file "$supply/online")
+        if [[ "$online" == 1 ]]; then
+            printf 'Secteur %s : connecté\n' "${supply##*/}"
+        else
+            printf 'Secteur %s : déconnecté\n' "${supply##*/}"
+        fi
+    done
+}
+
+show_status() {
+    local profile governor
+    printf 'Gestion de l’alimentation\n'
+    if command -v powerprofilesctl >/dev/null 2>&1; then
+        profile=$(powerprofilesctl get 2>/dev/null || printf 'inconnu')
+        printf 'Profil : %s\n' "$profile"
+    else
+        printf 'Profil : power-profiles-daemon indisponible\n'
+    fi
+
+    governor=$(read_first_file \
+        /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor || printf 'inconnu')
+    printf 'Gouverneur CPU : %s\n' "$governor"
+    show_ac
+    show_battery
+}
+
+set_profile() {
+    local profile="${1:-}"
+    case "$profile" in
+        balanced|performance|power-saver) ;;
+        *)
+            printf 'Erreur : profil invalide : %s\n' "${profile:-}" >&2
+            printf 'Profils disponibles : balanced, performance, power-saver\n' >&2
+            exit 2
+            ;;
+    esac
+
+    require_command powerprofilesctl
+    if ! powerprofilesctl set "$profile"; then
+        printf 'Erreur : impossible d’appliquer le profil %s.\n' "$profile" >&2
+        exit 1
+    fi
+    printf 'Profil d’alimentation appliqué : %s\n' "$profile"
+}
+
+system_action() {
+    local action="$1"
+    require_command systemctl
+    systemctl "$action"
+}
+
+main() {
+    case "${1:-}" in
+        status)
+            show_status
+            ;;
+        profile)
+            set_profile "${2:-}"
+            ;;
+        run)
+            shift
+            run_task "$@"
+            ;;
+        suspend|hibernate|reboot|poweroff)
+            system_action "$1"
+            ;;
+        -h|--help|help)
+            usage
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+}
+
+main "$@"

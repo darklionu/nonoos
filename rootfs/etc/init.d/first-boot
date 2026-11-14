@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # nonoos - configuration au premier démarrage
-# Choix : langue, clavier, environnement(s) -> installation des paquets associés.
+# Choix : langue, clavier, environnements et profil utilisateur.
 # Cible : systèmes basés sur Debian/Ubuntu (apt).
 #
 # Interface (détectée automatiquement, dans cet ordre) :
@@ -29,6 +29,7 @@ TITLE="nonoos"
 LANG_CHOICE="fr_FR.UTF-8"
 KB_CHOICE="fr"
 PROFILES="office"
+USER_PROFILE="standard"
 SSH_ENABLED="no"
 BLUETOOTH_ENABLED="no"
 INSTALL_STATUS=""
@@ -513,6 +514,19 @@ ask_profiles() {
 
     # Par défaut : bureautique
     [ -z "$PROFILES" ] && PROFILES="office"
+}
+
+ask_user_profile() {
+    USER_PROFILE=$(ui_menu "$TITLE" \
+        "Choisissez le profil personnel de l’utilisateur. Ce choix ne modifie pas ses privilèges." \
+        "standard" \
+        "standard" "Standard — usage quotidien" \
+        "developer" "Développeur — développement logiciel" \
+        "support" "Support — diagnostic et assistance")
+    case "$USER_PROFILE" in
+        developer|support|standard) ;;
+        *) USER_PROFILE="standard" ;;
+    esac
 }
 
 ask_system_services() {
@@ -1243,11 +1257,12 @@ ui_msg "$TITLE" \
 ask_language
 ask_keyboard
 ask_profiles
+ask_user_profile
 ask_system_services
 
 # Récapitulatif + confirmation
 if ! ui_yesno "$TITLE" \
-    "Récapitulatif :\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\n\nLes applications associées vont être installées."
+    "Récapitulatif :\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s) logiciels  : $PROFILES\nProfil utilisateur   : $USER_PROFILE\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\n\nLes applications associées vont être installées."
 then
     echo "Configuration annulée. Relancez le script pour recommencer." >&2
     exit 1
@@ -1270,6 +1285,14 @@ else
     if ! create_user_account "$USER_NAME" "$USER_PASSWORD" "$USER_PRIVILEGES"; then
         record_failure "Création ou configuration du compte $USER_NAME échouée."
     fi
+fi
+
+if id -u "$USER_NAME" >/dev/null 2>&1; then
+    if ! /usr/local/bin/nonoos-profile --set "$USER_PROFILE" --user "$USER_NAME"; then
+        record_failure "Enregistrement du profil personnel de $USER_NAME échoué."
+    fi
+else
+    record_failure "Impossible d'enregistrer un profil personnel sans compte utilisateur."
 fi
 
 # Proposer la récupération des fichiers de l'ancienne installation avant de
@@ -1337,13 +1360,13 @@ if [ "$FIRST_BOOT_FAILED" = yes ] || [ "$PACKAGE_FAILED" = yes ]; then
     INSTALL_STATUS+="Échecs détectés :${FIRST_BOOT_FAILURES}"
     INSTALL_STATUS+=$'\nLe script est conservé pour permettre une nouvelle tentative.'
     ui_msg "$TITLE" \
-        "Configuration initiale incomplète.\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\nUtilisateur          : $USER_NAME\nPrivilèges            : $USER_PRIVILEGES\n\n$INSTALL_STATUS" \
+        "Configuration initiale incomplète.\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s) logiciels  : $PROFILES\nProfil utilisateur   : $USER_PROFILE\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\nUtilisateur          : $USER_NAME\nPrivilèges            : $USER_PRIVILEGES\n\n$INSTALL_STATUS" \
         "Terminer"
     exit 1
 fi
 
 ui_msg "$TITLE" \
-    "Configuration initiale terminée.\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s)            : $PROFILES\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\nUtilisateur          : $USER_NAME\nPrivilèges            : $USER_PRIVILEGES\n\n$INSTALL_STATUS" \
+    "Configuration initiale terminée.\n\nLangue               : $LANG_CHOICE\nClavier              : $KB_CHOICE\nProfil(s) logiciels  : $PROFILES\nProfil utilisateur   : $USER_PROFILE\nBureau               : $(profile_display_mode "$PROFILES")\nSSH                  : $SSH_ENABLED\nBluetooth            : $BLUETOOTH_ENABLED\nUtilisateur          : $USER_NAME\nPrivilèges            : $USER_PRIVILEGES\n\n$INSTALL_STATUS" \
     "Terminer"
 
 rm -f -- "$0"

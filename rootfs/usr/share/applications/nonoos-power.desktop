@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Gestion de l’alimentation NonoOS
+Name[fr]=Gestion de l’alimentation NonoOS
+Comment=Consulter la batterie et gérer les profils d’alimentation
+Comment[fr]=Consulter la batterie et gérer les profils d’alimentation
+Exec=/usr/bin/nonoos-power-gui
+Icon=preferences-system-power-management
+Terminal=false
+Categories=System;Settings;
+StartupNotify=true

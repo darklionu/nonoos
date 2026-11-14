@@ -4,12 +4,48 @@ shopt -s nullglob
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$PROJECT_DIR/dist"
-OUTPUT_ISO="$OUTPUT_DIR/nonoos-live-amd64.iso"
+TARGET_ARCH="${TARGET_ARCH:-amd64}"
 KERNEL_SOURCE="$PROJECT_DIR/linux-6.18"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_DIR/.build/nonoos-live}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://deb.debian.org/debian}"
 APT_HTTP_PROXY="${APT_HTTP_PROXY:-}"
+SECURE_BOOT="${SECURE_BOOT:-0}"
+SECURE_BOOT_KEY="${SECURE_BOOT_KEY:-}"
+SECURE_BOOT_CERT="${SECURE_BOOT_CERT:-}"
+BOOTLOADER=syslinux
 TOTAL_STAGES=9
+
+case "$TARGET_ARCH" in
+    amd64|x86_64)
+        TARGET_ARCH="amd64"
+        DEBIAN_ARCH="amd64"
+        KERNEL_ARCH="x86_64"
+        KERNEL_DEFCONFIG="x86_64_defconfig"
+        KERNEL_BOOT_PATH="arch/x86/boot/bzImage"
+        KERNEL_BUILD_TARGET="bzImage"
+        GRUB_EFI_PACKAGE="grub-efi-amd64-bin"
+        GRUB_EFI_SIGNED_PACKAGE="grub-efi-amd64-signed"
+        CROSS_COMPILE=""
+        ;;
+    arm64|aarch64)
+        TARGET_ARCH="arm64"
+        DEBIAN_ARCH="arm64"
+        KERNEL_ARCH="arm64"
+        KERNEL_DEFCONFIG="defconfig"
+        KERNEL_BOOT_PATH="arch/arm64/boot/Image"
+        KERNEL_BUILD_TARGET="Image"
+        GRUB_EFI_PACKAGE="grub-efi-arm64-bin"
+        GRUB_EFI_SIGNED_PACKAGE="grub-efi-arm64-signed"
+        CROSS_COMPILE="aarch64-linux-gnu-"
+        BOOTLOADER=grub-efi
+        ;;
+    *)
+        echo "ARCHITECTURE cible invalide : $TARGET_ARCH (valeurs supportées : amd64, x86_64, arm64, aarch64)" >&2
+        exit 1
+        ;;
+esac
+
+OUTPUT_ISO="$OUTPUT_DIR/nonoos-live-${TARGET_ARCH}.iso"
 
 progress() {
     local stage="$1"
@@ -42,10 +78,14 @@ for tool in lb debootstrap xorriso mksquashfs gcc g++ pkg-config make bc bison f
     fi
 done
 
+if [[ "$TARGET_ARCH" == "arm64" ]] && ! command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+    missing+=("aarch64-linux-gnu-gcc")
+fi
+
 if (("${#missing[@]}" > 0)); then
     printf 'Outils manquants : %s\n' "${missing[*]}" >&2
     echo "Sur Debian/Ubuntu, installez-les avec :" >&2
-    echo "  sudo apt update && sudo apt install live-build debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools dosfstools build-essential bc bison flex libelf-dev libssl-dev openssl perl python3 rustc kmod qt6-base-dev" >&2
+    echo "  sudo apt update && sudo apt install live-build debootstrap xorriso squashfs-tools grub-pc-bin grub-efi-amd64-bin grub-efi-arm64-bin mtools dosfstools build-essential bc bison flex libelf-dev libssl-dev openssl perl python3 rustc kmod qt6-base-dev gcc-aarch64-linux-gnu" >&2
     exit 1
 fi
 
@@ -64,6 +104,34 @@ if ! pkg-config --exists Qt6Widgets; then
     echo "Qt 6 Widgets est introuvable via pkg-config." >&2
     echo "Installez le paquet qt6-base-dev sur l’hôte de construction." >&2
     exit 1
+fi
+
+if [[ "$SECURE_BOOT" == 1 ]]; then
+    if [[ -z "$SECURE_BOOT_KEY" || -z "$SECURE_BOOT_CERT" ]]; then
+        echo "SECURE_BOOT=1 nécessite SECURE_BOOT_KEY et SECURE_BOOT_CERT." >&2
+        exit 1
+    fi
+    for secure_boot_file in "$SECURE_BOOT_KEY" "$SECURE_BOOT_CERT"; do
+        if [[ ! -r "$secure_boot_file" ]]; then
+            echo "Fichier Secure Boot introuvable ou illisible : $secure_boot_file" >&2
+            exit 1
+        fi
+    done
+    if ! command -v sbsign >/dev/null 2>&1; then
+        echo "Outil requis pour Secure Boot introuvable : sbsign" >&2
+        echo "Installez le paquet sbsigntool sur l’hôte de construction." >&2
+        exit 1
+    fi
+    BOOTLOADER=grub-efi
+elif [[ "$SECURE_BOOT" != 0 ]]; then
+    echo "SECURE_BOOT doit valoir 0 ou 1." >&2
+    exit 1
+fi
+
+if [[ "$TARGET_ARCH" == "arm64" ]]; then
+    if [[ "$BOOTLOADER" == "syslinux" ]]; then
+        BOOTLOADER=grub-efi
+    fi
 fi
 
 progress 1 "Préparation de l'environnement de construction"
@@ -85,6 +153,11 @@ g++ -std=c++17 -Wall -Wextra -pedantic \
     $(pkg-config --cflags --libs Qt6Widgets) \
     -o "$BUILD_DIR/nonoos-startup-manager"
 
+g++ -std=c++17 -Wall -Wextra -pedantic \
+    "$PROJECT_DIR/rootfs/gestion-alllimentations/power-gui.cpp" \
+    $(pkg-config --cflags --libs Qt6Widgets) \
+    -o "$BUILD_DIR/nonoos-power-gui"
+
 rustc --edition=2021 -O "$PROJECT_DIR/src/nonoos-security.rs" \
     -o "$BUILD_DIR/nonoos-security"
 
@@ -94,7 +167,7 @@ KERNEL_RELEASE=""
 
 progress 3 "Configuration du noyau Linux"
 mkdir -p "$KERNEL_BUILD_DIR"
-make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" x86_64_defconfig
+make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" ARCH="$KERNEL_ARCH" CROSS_COMPILE="$CROSS_COMPILE" "$KERNEL_DEFCONFIG"
 "$KERNEL_SOURCE/scripts/config" --file "$KERNEL_BUILD_DIR/.config" \
     --set-str LOCALVERSION "-nonoos" \
     --disable LOCALVERSION_AUTO \
@@ -104,10 +177,33 @@ make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" x86_64_defconfig
     --enable ISO9660_FS \
     --enable OVERLAY_FS \
     --enable SQUASHFS \
+    --enable EFI \
+    --enable EFI_STUB \
+    --enable EFI_PARTITION \
+    --enable VFAT_FS \
+    --enable MSDOS_PARTITION \
+    --enable ATA \
+    --enable SATA_AHCI \
+    --enable BLK_DEV_NVME \
     --enable VIRTIO \
     --enable VIRTIO_BLK \
     --enable VIRTIO_NET \
     --enable VIRTIO_PCI
+if [[ "$TARGET_ARCH" == "arm64" ]]; then
+    "$KERNEL_SOURCE/scripts/config" --file "$KERNEL_BUILD_DIR/.config" \
+        --enable ARM64_VA_BITS_48 \
+        --enable ARM64_64K_PAGES \
+        --enable PCI \
+        --enable PCI_HOST_GENERIC
+fi
+if [[ "$SECURE_BOOT" == 1 ]]; then
+    "$KERNEL_SOURCE/scripts/config" --file "$KERNEL_BUILD_DIR/.config" \
+        --enable MODULE_SIG \
+        --enable MODULE_SIG_ALL \
+        --enable MODULE_SIG_SHA256 \
+        --set-str MODULE_SIG_KEY "$SECURE_BOOT_KEY" \
+        --set-str SYSTEM_TRUSTED_KEYS "$SECURE_BOOT_CERT"
+fi
 make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" olddefconfig
 for required_config in \
     CONFIG_BLK_DEV_INITRD \
@@ -116,6 +212,14 @@ for required_config in \
     CONFIG_ISO9660_FS \
     CONFIG_OVERLAY_FS \
     CONFIG_SQUASHFS \
+    CONFIG_EFI \
+    CONFIG_EFI_STUB \
+    CONFIG_EFI_PARTITION \
+    CONFIG_VFAT_FS \
+    CONFIG_MSDOS_PARTITION \
+    CONFIG_ATA \
+    CONFIG_SATA_AHCI \
+    CONFIG_BLK_DEV_NVME \
     CONFIG_VIRTIO \
     CONFIG_VIRTIO_BLK \
     CONFIG_VIRTIO_NET \
@@ -126,21 +230,41 @@ do
         exit 1
     fi
 done
+if [[ "$SECURE_BOOT" == 1 ]]; then
+    for required_config in CONFIG_MODULE_SIG CONFIG_MODULE_SIG_ALL CONFIG_MODULE_SIG_SHA256; do
+        if ! grep -q "^${required_config}=y$" "$KERNEL_BUILD_DIR/.config"; then
+            echo "Configuration Secure Boot requise absente : $required_config" >&2
+            exit 1
+        fi
+    done
+fi
 
 progress 4 "Compilation du noyau Linux et de ses modules"
-make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" -j"$(nproc)" bzImage modules
-KERNEL_RELEASE="$(make -s -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" kernelrelease)"
-make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" \
+make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" ARCH="$KERNEL_ARCH" CROSS_COMPILE="$CROSS_COMPILE" -j"$(nproc)" "$KERNEL_BUILD_TARGET" modules
+KERNEL_RELEASE="$(make -s -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" ARCH="$KERNEL_ARCH" CROSS_COMPILE="$CROSS_COMPILE" kernelrelease)"
+make -C "$KERNEL_SOURCE" O="$KERNEL_BUILD_DIR" ARCH="$KERNEL_ARCH" CROSS_COMPILE="$CROSS_COMPILE" \
     INSTALL_MOD_PATH="$KERNEL_STAGE" modules_install
+
+KERNEL_IMAGE="$KERNEL_BUILD_DIR/$KERNEL_BOOT_PATH"
+if [[ "$SECURE_BOOT" == 1 ]]; then
+    local_signed_image="${KERNEL_IMAGE%.gz}.signed"
+    if [[ "$TARGET_ARCH" == "arm64" ]]; then
+        local_signed_image="${KERNEL_IMAGE%.*}.signed"
+    fi
+    sbsign --key "$SECURE_BOOT_KEY" --cert "$SECURE_BOOT_CERT" \
+        --output "$local_signed_image" \
+        "$KERNEL_IMAGE"
+    KERNEL_IMAGE="$local_signed_image"
+fi
 
 progress 5 "Configuration de l'image live Debian"
 cd "$BUILD_DIR"
 lb_config_args=(
     --distribution trixie
-    --architectures amd64
+    --architectures "$DEBIAN_ARCH"
     --mode debian
     --binary-images iso-hybrid
-    --bootloader syslinux
+    --bootloader "$BOOTLOADER"
     --syslinux-theme live-build
     --initramfs live-boot
     --initsystem systemd
@@ -163,12 +287,11 @@ fi
 lb config "${lb_config_args[@]}"
 
 mkdir -p config/package-lists config/includes.chroot
-cat > config/package-lists/newdistrib.list.chroot <<'EOF'
+cat > config/package-lists/newdistrib.list.chroot <<EOF
 live-boot
 initramfs-tools
 live-config
 systemd-sysv
-isolinux
 network-manager
 wpasupplicant
 whiptail
@@ -178,6 +301,8 @@ keyboard-configuration
 ca-certificates
 libsdl2-dev
 kde-plasma-desktop
+calamares
+calamares-settings-debian
 sddm
 plasma-nm
 dolphin
@@ -191,17 +316,44 @@ python3
 procps
 iproute2
 flatpak
+power-profiles-daemon
 ufw
 bubblewrap
 e2fsprogs
 util-linux
+parted
+gparted
+efibootmgr
+dosfstools
+$GRUB_EFI_PACKAGE
+grub2-common
+cryptsetup
+lvm2
+btrfs-progs
+xfsprogs
 EOF
 
-mkdir -p config/includes.chroot/usr/lib/syslinux
-ln -sfn /usr/lib/ISOLINUX/isolinux.bin \
-    config/includes.chroot/usr/lib/syslinux/isolinux.bin
-ln -sfn /usr/lib/syslinux/modules/bios/vesamenu.c32 \
-    config/includes.chroot/usr/lib/syslinux/vesamenu.c32
+if [[ "$TARGET_ARCH" == "amd64" ]]; then
+    cat >> config/package-lists/newdistrib.list.chroot <<'EOF'
+isolinux
+EOF
+fi
+
+if [[ "$SECURE_BOOT" == 1 ]]; then
+    cat >> config/package-lists/newdistrib.list.chroot <<EOF
+$GRUB_EFI_PACKAGE
+${GRUB_EFI_SIGNED_PACKAGE}
+shim-signed
+EOF
+fi
+
+if [[ "$TARGET_ARCH" == "amd64" ]]; then
+    mkdir -p config/includes.chroot/usr/lib/syslinux
+    ln -sfn /usr/lib/ISOLINUX/isolinux.bin \
+        config/includes.chroot/usr/lib/syslinux/isolinux.bin
+    ln -sfn /usr/lib/syslinux/modules/bios/vesamenu.c32 \
+        config/includes.chroot/usr/lib/syslinux/vesamenu.c32
+fi
 
 progress 6 "Installation des fichiers NonoOS dans l'image"
 cp -a "$PROJECT_DIR/rootfs/." config/includes.chroot/
@@ -211,6 +363,8 @@ install -D -m 0755 "$BUILD_DIR/nonoos-security-center" \
     config/includes.chroot/usr/bin/nonoos-security-center
 install -D -m 0755 "$BUILD_DIR/nonoos-startup-manager" \
     config/includes.chroot/usr/bin/nonoos-startup-manager
+install -D -m 0755 "$BUILD_DIR/nonoos-power-gui" \
+    config/includes.chroot/usr/bin/nonoos-power-gui
 install -D -m 0755 "$BUILD_DIR/nonoos-security" \
     config/includes.chroot/usr/bin/nonoos-security
 install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_tableauxdebord.sh" \
@@ -219,10 +373,12 @@ install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_newuser.sh" \
     config/includes.chroot/usr/local/bin/nonoos-create-test-user
 install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_testshell.sh" \
     config/includes.chroot/usr/local/bin/nonoos-test-shell
+install -D -m 0755 "$PROJECT_DIR/rootfs/gestion-alllimentations/nonoos-power" \
+    config/includes.chroot/usr/local/bin/nonoos-power
 install -D -m 0755 "$PROJECT_DIR/rootfs/gestionnaire de sécurité/s" \
     config/includes.chroot/usr/local/bin/nonoos-firewall
 mkdir -p config/includes.chroot/boot config/includes.chroot/lib/modules
-install -m 0644 "$KERNEL_BUILD_DIR/arch/x86/boot/bzImage" \
+install -m 0644 "$KERNEL_IMAGE" \
     "config/includes.chroot/boot/vmlinuz-$KERNEL_RELEASE"
 install -m 0644 "$KERNEL_BUILD_DIR/System.map" \
     "config/includes.chroot/boot/System.map-$KERNEL_RELEASE"
@@ -318,7 +474,7 @@ cp -a "${kernel_files[0]}" "${initramfs_files[0]}" binary/live/
 progress 8 "Construction de l'image ISO (live-build)"
 lb binary
 
-ISO_PATH="$BUILD_DIR/live-image-amd64.hybrid.iso"
+ISO_PATH="$BUILD_DIR/live-image-${DEBIAN_ARCH}.hybrid.iso"
 if [[ ! -s "$ISO_PATH" ]]; then
     echo "La construction s'est terminée sans produire l'image ISO attendue : $ISO_PATH" >&2
     exit 1

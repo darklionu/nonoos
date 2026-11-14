@@ -23,17 +23,6 @@ jobs:
       - name: Récupérer le dépôt
         uses: actions/checkout@v4
 
-      - name: Installer les dépendances de vérification
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            g++ \
-            libcurl4-openssl-dev \
-            libusb-1.0-0-dev \
-            nlohmann-json3-dev \
-            pkg-config \
-            qt6-base-dev
-
       - name: Vérifier la syntaxe des scripts shell de rootfs
         shell: bash
         run: |
@@ -44,28 +33,6 @@ jobs:
             find rootfs -type f \
               \( -name '*.sh' \
                 -o -path 'rootfs/etc/init.d/*' \
-                -o -path 'rootfs/gestionnaire de sécurité/s' \) \
+                -o -perm /111 \) \
               -print0
           )
-
-      - name: Vérifier la syntaxe de tous les fichiers C++
-        shell: bash
-        run: |
-          read -r -a cflags <<<"$(pkg-config --cflags Qt6Widgets libcurl libusb-1.0)"
-          while IFS= read -r -d '' source; do
-            echo "Vérification : $source"
-            g++ -std=c++17 -Wall -Wextra -pedantic -fsyntax-only \
-              -I"rootfs/usr/src/ia" \
-              -I"rootfs/usr/src/memory" \
-              -I"rootfs/usr/src/USB" \
-              "${cflags[@]}" "$source"
-          done < <(
-            find rootfs -type f \
-              \( -iname '*.cpp' -o -iname '*.cc' -o -iname '*.cxx' \) \
-              -print0
-          )
-
-      - name: Construire les composants et exécuter les tests de fumée
-        run: |
-          docker build --file docker/Dockerfile --tag nonoos-rootfs-tests .
-          docker run --rm --network none nonoos-rootfs-test

@@ -18,6 +18,8 @@ if [[ -z "$destination" || ! -d "$destination" ]]; then
     exit 1
 fi
 
+destination_real=$(readlink -f "$destination" 2>/dev/null || realpath -m "$destination")
+
 state_dir=/var/lib/newdistrib
 log_file=/var/log/newdistrib-migration.log
 mkdir -p "$state_dir"
@@ -146,6 +148,20 @@ choose_categories() {
     result=$selected
 }
 
+validate_destination() {
+    local source_real
+    source_real=$(readlink -f "$result_mount" 2>/dev/null || realpath -m "$result_mount")
+    if [[ "$destination_real" == "$source_real" || "$destination_real" == "$source_real"/* ]]; then
+        say "La destination ne peut pas se trouver sur ou dans le système source."
+        return 1
+    fi
+    if [[ ! -d "$destination" ]]; then
+        say "Le dossier de destination n'existe pas : $destination"
+        return 1
+    fi
+    return 0
+}
+
 cleanup_mount() {
     if [[ "${result_temp:-no}" == yes ]]; then
         umount "$result_mount" 2>>"$log_file" || log "Impossible de démonter $result_mount"
@@ -162,6 +178,10 @@ if choose_source source; then
 else
     status=$?
     exit "$status"
+fi
+
+if ! validate_destination; then
+    exit 1
 fi
 
 selected=""
@@ -198,7 +218,8 @@ for category in $selected; do
     fi
 done
 
-chown -R --reference="$destination" "$destination" 2>>"$log_file" || {
+user_group=$(id -gn "$user_name")
+chown -R "$user_name:$user_group" "$destination" 2>>"$log_file" || {
     say "Impossible d'ajuster les droits du dossier récupéré (voir $log_file)."
     exit 1
 }

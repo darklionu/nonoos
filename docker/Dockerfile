@@ -18,7 +18,7 @@ COPY docker/smoke-test.sh /usr/local/bin/nonoos-smoke-test
 
 RUN g++ -std=c++17 -Wall -Wextra -pedantic -Iia \
         ia/main.cpp ia/Chatbot.cpp ia/IntentDetector.cpp ia/TextProcessing.cpp \
-        ia/WeatherService.CPP ia/UsbService.cpp \
+        ia/WeatherService.CPP ia/UsbService.cpp ia/rapelle.cpp \
         -o /usr/local/bin/chatia -lcurl \
     && g++ -std=c++17 -Wall -Wextra -pedantic -Imemory \
         memory/ram_memory.cpp -o /usr/local/bin/ram-memory \

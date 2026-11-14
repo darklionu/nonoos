@@ -1,104 +1,130 @@
 # NONOOS
 
-NonoOS est une distribution Linux live basée sur Debian et optimisée pour les environnements de bureau, la gestion système et la sécurité. Le projet combine un noyau Linux 6.18, un système de live build Debian/Ubuntu, un environnement graphique KDE Plasma et des outils personnalisés pour administrer le système, gérer les mises à jour et sécuriser l’installation.
+NonoOS est une distribution Linux live basée sur Debian et conçue pour servir de base à un environnement de bureau personnalisé, avec un accent sur la maintenance système, la sécurité, l’administration et les outils de diagnostic.
 
-Le dépôt sert à construire une image ISO bootable pour x86_64, avec une configuration par défaut en français, des outils de maintenance intégrés et une base système prête à personnaliser.
+Le projet construit une image ISO bootable pour architectures amd64/x86_64 et arm64/aarch64, embarque des composants KDE Plasma et propose un ensemble d’outils de gestion, de surveillance et d’installation adaptés à des environnements de test, de démonstration et de personnalisation.
+
+## Ce que contient le projet
+
+NonoOS assemble un système live Debian pour les machines amd64/x86_64 et arm64/aarch64. L’image
+comprend notamment :
+
+- un noyau Linux 6.18 configuré et compilé par le script du projet ;
+- un environnement KDE Plasma, avec SDDM pour ouvrir une session graphique ;
+- NetworkManager et une configuration francophone par défaut ;
+- des outils graphiques NonoOS pour le démarrage, les logiciels, la sécurité,
+  l’alimentation et les informations système ;
+- un choix de profil personnel par compte (standard, développeur ou support),
+  modifiable depuis le bureau ou la commande `nonoos-profile` ;
+- ChatIA et des outils de diagnostic pour le Wi-Fi, l’USB et la mémoire ;
+- Calamares pour guider l’installation sur disque ;
+- des services de premier démarrage et d’exécution à chaque démarrage ;
+- le mécanisme de persistance live, à utiliser avec une partition dédiée.
+
+Le contenu de `rootfs/` est ajouté au système de fichiers de l’image ; les
+binaires personnalisés sont construits séparément pendant la génération de
+l’ISO. La documentation de ce contenu se trouve dans
+[`rootfs/README.md`](rootfs/README.md).
+
+## Arborescence principale
+
+```text
+.
+├── build-live-iso.sh          # script principal de génération de l'ISO
+├── docker/                    # fichiers Docker et tests de fumée
+├── dist/                      # sortie de build (ISO générée)
+├── linux-6.18/                # sources du noyau Linux 6.18
+├── rootfs/                    # contenu du système live / outils personnalisés
+├── src/                       # composants complémentaires (Rust, outils système)
+├── tests/                     # scripts de validation et de test du boot
+├── .github/workflows/         # CI GitHub Actions
+├── README.md                  # documentation du projet
+└── ...
+```
+
+### Sous-arborescence utile
+
+```text
+rootfs/
+├── apps/                         # applications NonoOS
+├── etc/                          # configuration, services et scripts système
+├── gestion-alllimentations/      # interface et commande d’alimentation
+├── gestionnaire de sécurité/     # centre de sécurité
+├── nonoos-info/                  # tableau de bord système
+├── update-center/                # interface de logiciels et mises à jour
+├── usr/
+│   ├── src/                      # ChatIA et outils USB/mémoire
+│   ├── migration-assistant/      # détection et inventaire de systèmes
+│   └── share/applications/       # lanceurs du bureau
+└── ...
+```
 
 ## Fonctionnalités principales
 
-- ISO live amd64 construite automatiquement
-- Noyau Linux 6.18 avec modules standards pour le stockage, le réseau et le boot live
-- Base Debian trixie avec KDE Plasma, SDDM, NetworkManager, sudo et outils système
-- Outils personnalisés :
-  - gestionnaire de démarrage
-  - centre de contrôle des mises à jour
-  - centre de sécurité
-  - pare-feu UFW
-  - tableau de bord de maintenance
-  - assistant ChatIA, scanner Wi-Fi et outils de diagnostic USB et mémoire
-  - scripts de création d’utilisateur et de tests
-- Configuration automatique au premier démarrage
-- Persistance live optionnelle sur une partition dédiée
-- Support de l’interface française et du clavier AZERTY
+### Environnement système
 
-## Vue d’ensemble du projet
+- base Debian trixie / live-build
+- KDE Plasma + SDDM + NetworkManager
+- support clavier AZERTY et langue française
+- configuration automatisée au premier démarrage
+- persistance optionnelle sur partition dédiée
 
-### Diagramme architectural
+### Outils intégrés
 
-```mermaid
-flowchart LR
-    A[build-live-iso.sh] --> B[Live build / Debian base]
-    A --> C[linux-6.18]
-    C --> D[Noyau personnalisé x86_64]
-    B --> E[rootfs/]
-    E --> F[Desktop KDE Plasma]
-    E --> G[Outils système / sécurité / maintenance]
-    E --> H[Scripts de premier boot]
-    D --> I[ISO hybride final]
-    E --> I
-    I --> J[USB / VM / machine cible]
-    J --> K[Session live NONOOS]
-    K --> L[Configuration initiale]
-    K --> M[Gestionnaire de démarrage]
-    K --> N[Centre de sécurité / mises à jour]
-    K --> O[Applications Qt et outils Rust]
-
-    subgraph "Composants" 
-        F
-        G
-        H
-        O
-    end
-```
-
-### Structure du dépôt
-
-- `build-live-iso.sh` : script principal de génération de l’image ISO
-- `linux-6.18/` : sources du noyau Linux 6.18
-- `rootfs/` : fichiers du système live et outils personnalisés
-- `src/` : composants logiciels complémentaires (ex. Rust pour la sécurité)
-- `docker/` : outils de conteneurisation/tests
-- `dist/` : sortie de la construction ISO (généré lors du build)
-
-### Exemple de contenu inclus
-
-- `rootfs/etc/init.d/first-boot` : configuration initiale du système
-- `rootfs/etc/init.d/every-boot` : tâches de maintenance à chaque démarrage
-- `rootfs/apps/gestionnaire-demarrage/` : gestionnaire de démarrage graphique
-- `rootfs/update-center/` : centre de mise à jour
-- `rootfs/gestionnaire de sécurité/` : console de sécurité / pare-feu
-- `rootfs/usr/src/` : sources de ChatIA et des outils USB et mémoire
-- `rootfs/usr/migration-assistant/` : détection en lecture seule des systèmes installés sur les partitions
-- `rootfs/usr/local/sbin/nonoos-migration-assistant` : récupération facultative des dossiers personnels proposée au premier démarrage
-- `src/nonoos-security.rs` : outil de supervision système en Rust
-- `.github/workflows/` et `docker/` : vérifications automatisées des composants
+- **Gestionnaire de démarrage** : interface d’administration des options liées
+  au démarrage.
+- **Centre de logiciels et mises à jour** : interface graphique des opérations
+  de gestion logicielle.
+- **Centre de sécurité** : accès aux outils et réglages de sécurité de NonoOS.
+- **Gestion de l’alimentation** : interface et commande dédiées aux actions
+  d’alimentation.
+- **Tableau de bord système** : informations et état général de la machine.
+- **ChatIA** : assistant fourni avec ses sources dans `rootfs/usr/src/ia/`.
+- **Outils de diagnostic** : composants liés au Wi-Fi, aux périphériques USB
+  et à la mémoire.
+- **Assistant de migration** : inventaire et détection de systèmes installés,
+  avec validation supplémentaire de la source et de la destination, refus des
+  destinations situées dans le système source et copie sans écrasement des
+  fichiers existants ; consultez sa documentation avant toute opération sur des
+  données.
+- **Profils utilisateur** : choix individuel Standard, Développeur ou Support
+  au premier démarrage ; chaque compte peut consulter ou changer son choix
+  depuis le lanceur « Profils utilisateur NonoOS » ou avec `nonoos-profile`.
+  Ce profil ne change pas les privilèges du compte ni les logiciels installés.
 
 ## Prérequis de compilation
 
-Le build utilise `live-build`, un environnement Debian/Ubuntu et des outils de compilation C/C++/Rust.
-
-Sur Debian/Ubuntu, installez les dépendances suivantes :
+La construction doit être lancée sur une machine Debian ou Ubuntu amd64/x86_64
+ou arm64/aarch64 avec un accès aux dépôts de paquets. Elle requiert les
+outils de live-build, les outils de création d’image, les compilateurs C/C++,
+Rust et les bibliothèques de développement utilisées par les applications. Pour
+un build amd64/x86_64, installez également les paquets EFI amd64 ; pour un
+build arm64/aarch64, installez le cross-toolchain GNU ARM 64 et les paquets EFI
+arm64 :
 
 ```bash
 sudo apt update
 sudo apt install \
   live-build debootstrap xorriso squashfs-tools \
-  grub-pc-bin grub-efi-amd64-bin mtools dosfstools \
-  build-essential bc bison flex libelf-dev libssl-dev \
-  openssl perl python3 rustc kmod qt6-base-dev \
-  pkg-config qemu-system-x86
+  grub-pc-bin grub-efi-amd64-bin grub-efi-arm64-bin \
+  mtools dosfstools build-essential bc bison flex \
+  libelf-dev libssl-dev openssl perl python3 rustc \
+  kmod qt6-base-dev pkg-config gcc-aarch64-linux-gnu \
+  debian-archive-keyring
 ```
 
-Le script vérifie aussi la présence de `lb`, `debootstrap`, `xorriso`, `mksquashfs`, `gcc`, `g++`, `make`, `depmod`, `nproc`, ainsi que le paquet Qt6Widgets.
+Le script vérifie la présence de `lb`, `debootstrap`, `xorriso`,
+`mksquashfs`, `gcc`, `g++`, `make`, `bc`, `bison`, `flex`, `openssl`,
+`depmod`, `perl`, `python3`, `rustc`, `nproc` et de Qt 6 Widgets via
+`pkg-config`. Il vérifie également les en-têtes libelf et le trousseau de clés
+Debian. Si un outil manque, le script affiche les dépendances à installer.
 
-## Vérifications automatiques
+QEMU n’est pas nécessaire pour générer l’ISO ; il est requis uniquement pour
+le test de démarrage décrit plus bas. Pour installer ce paquet séparément :
 
-Deux workflows GitHub Actions vérifient les composants du dépôt sur Ubuntu :
-
-- `.github/workflows/ci.yml` vérifie la syntaxe des scripts shell de `rootfs/`, contrôle la syntaxe de tous les fichiers C++ de `rootfs/`, puis construit et exécute les tests de fumée Docker.
-- `.github/workflows/di.yml` compile séparément les trois applications graphiques Qt, compile le scanner Wi-Fi, vérifie le module mémoire, compile l’outil USB, vérifie la syntaxe des scripts shell et exécute les mêmes tests de fumée Docker.
-
-Ces workflows se déclenchent sur les push et pull requests vers `main` lorsqu’un fichier correspondant à leurs filtres est modifié. Ils peuvent aussi être lancés manuellement depuis l’onglet **Actions** de GitHub. Les tests Docker s’exécutent avec le réseau désactivé et vérifient notamment les réponses de ChatIA (salutation, calcul et détection USB) ainsi que les mesures RAM et CPU de l’outil mémoire.
+```bash
+sudo apt install qemu-system-x86
+```
 
 ## Génération de l’ISO
 
@@ -108,151 +134,165 @@ Depuis la racine du dépôt :
 sudo ./build-live-iso.sh
 ```
 
-Le script affiche une barre de progression par grandes étapes tout en
-conservant les journaux détaillés de compilation. Le répertoire
-`.build/nonoos-live/` est conservé entre les exécutions afin de reprendre les
-étapes déjà réussies ; utilisez `BUILD_DIR=/chemin/personnalise` pour changer
-son emplacement.
-
-Le miroir Debian et le proxy APT peuvent être adaptés à un réseau local ou à
-un cache déjà disponible :
-
-```bash
-sudo DEBIAN_MIRROR=http://miroir-local/debian \
-  APT_HTTP_PROXY=http://proxy-local:3142 \
-  ./build-live-iso.sh
-```
-
-Le proxy est facultatif. Un accès réseau au miroir reste nécessaire si les
-paquets ne sont pas déjà disponibles dans le cache de live-build.
-
-Le script :
-
-1. compile les outils Qt et Rust personnalisés,
-2. configure le noyau Linux 6.18 pour x86_64,
-3. crée un environnement live Debian,
-4. injecte le contenu de `rootfs/`,
-5. construit l’ISO hybride final.
-
-La sortie est générée dans :
+Le script doit être exécuté en tant que `root` (par exemple avec `sudo`). Il
+vérifie d’abord les sources du noyau et les outils nécessaires, compile les
+applications personnalisées, configure puis compile le noyau Linux, prépare
+le système live et fabrique l’image ISO. La progression des étapes est
+affichée dans le terminal. La sortie dépend de l’architecture cible :
 
 ```bash
 dist/nonoos-live-amd64.iso
+dist/nonoos-live-arm64.iso
 ```
 
-### Test de démarrage avec QEMU
+L’architecture peut être forcée avec `TARGET_ARCH` avant le lancement ; les
+aliases `x86_64` et `aarch64` sont également acceptés :
 
-Après la construction de l’ISO, vérifiez son démarrage sans machine virtuelle
-graphique :
+```bash
+sudo TARGET_ARCH=amd64 ./build-live-iso.sh
+sudo TARGET_ARCH=x86_64 ./build-live-iso.sh
+sudo TARGET_ARCH=arm64 ./build-live-iso.sh
+sudo TARGET_ARCH=aarch64 ./build-live-iso.sh
+```
+
+Le répertoire de travail par défaut est `.build/nonoos-live/`. Il peut être
+déplacé en définissant `BUILD_DIR` avant de lancer le script. Les variables
+`DEBIAN_MIRROR` et `APT_HTTP_PROXY` permettent respectivement de choisir un
+miroir Debian et un proxy HTTP APT lors de la construction. Par exemple :
+
+```bash
+sudo TARGET_ARCH=arm64 BUILD_DIR=/var/tmp/nonoos-build \
+  DEBIAN_MIRROR=https://deb.debian.org/debian \
+  ./build-live-iso.sh
+```
+
+### Secure Boot
+
+Secure Boot est désactivé par défaut. Pour le demander, fournissez une clé
+privée et son certificat lisibles par le script, ainsi que l’outil `sbsign`
+(paquet `sbsigntool`) :
+
+```bash
+sudo SECURE_BOOT=1 \
+  SECURE_BOOT_KEY=/chemin/vers/MOK.key \
+  SECURE_BOOT_CERT=/chemin/vers/MOK.crt \
+  ./build-live-iso.sh
+```
+
+Avec cette option, le script sélectionne GRUB EFI, active la signature des
+modules du noyau et signe l’image du noyau. Le certificat doit être inscrit
+dans le firmware UEFI de la machine cible ; sans cela, le démarrage sécurisé
+peut refuser les composants signés. Gardez la clé privée protégée et ne la
+placez pas dans le dépôt.
+
+## Vérifications automatiques
+
+Les workflows GitHub Actions s’exécutent sur les changements ciblant la
+branche `main` et touchant `rootfs/` ou les fichiers de workflow ; ils peuvent
+aussi être lancés manuellement. Ils vérifient la syntaxe des scripts shell
+sélectionnés dans `rootfs/` avec `bash -n`. Les applications C++ et le noyau
+sont compilés pendant la génération de l’ISO, pas par ces workflows CI.
+
+Les workflows sont définis dans [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+et [`.github/workflows/di.yml`](.github/workflows/di.yml).
+
+## Tester le démarrage
+
+Après génération de l’ISO, vous pouvez vérifier le démarrage dans QEMU. Le
+paquet `qemu-system-x86` doit être installé :
 
 ```bash
 ./tests/qemu-boot.sh
 ```
 
-Le script démarre l’ISO avec un disque virtuel, une carte réseau VirtIO et une
-console série. Il surveille les erreurs critiques du noyau et de l’initramfs,
-puis arrête automatiquement QEMU après 90 secondes. Une autre ISO peut être
-testée en la donnant comme argument :
+Le test démarre l’ISO sans interface graphique, avec l’accélération TCG, 2 Go
+de mémoire et deux processeurs par défaut. Il collecte la sortie série et
+signale certaines erreurs critiques de démarrage, notamment un kernel panic
+ou un échec du montage de la racine. Après 90 secondes sans erreur détectée,
+le délai d’attente est considéré comme une fin de test normale ; cela ne
+remplace pas un test fonctionnel complet du bureau.
+
+Les paramètres peuvent être adaptés par variables d’environnement :
 
 ```bash
-./tests/qemu-boot.sh /chemin/vers/nonoos-live-amd64.iso
+QEMU_TIMEOUT_SECONDS=120 QEMU_MEMORY_MB=3072 QEMU_CPUS=4 \
+  ./tests/qemu-boot.sh
 ```
 
-La mémoire, le nombre de processeurs et le délai peuvent être ajustés avec
-`QEMU_MEMORY_MB`, `QEMU_CPUS` et `QEMU_TIMEOUT_SECONDS`.
+Il est aussi possible de donner explicitement le chemin de l’ISO en premier
+argument.
 
 ## Utilisation
 
-### Démarrage
+### Démarrer en live
 
-- gravez l’image ISO sur un support USB,
-- ou exécutez-la depuis un environnement de virtualisation compatible (QEMU, VirtualBox, VMware, etc.),
-- choisissez le système bootable et lancez la session live.
+1. Écrivez l’ISO sur une clé USB avec un outil adapté, ou démarrez-la dans
+   QEMU, VirtualBox ou VMware.
+2. Sélectionnez le périphérique de démarrage dans le menu UEFI/BIOS.
+3. Lancez la session live depuis le menu proposé.
 
-### Persistance de la session live
+L’image est configurée avec les paramètres régionaux français, un clavier
+français et l’utilisateur live `nonoos`.
 
-L’ISO est construite avec le support `live-boot` et demande automatiquement
-une couche de persistance grâce à l’option de démarrage `persistence`. Pour
-conserver les fichiers et les réglages entre deux démarrages, préparez une
-partition dédiée depuis la session live :
+### Installation sur disque
+
+Depuis la session live, ouvrez le lanceur d’installation NonoOS ou démarrez
+Calamares depuis un terminal :
+
+```bash
+calamares
+```
+
+Dans l’assistant, vérifiez soigneusement le disque cible et les choix de
+partitionnement avant de confirmer l’installation : ces opérations peuvent
+modifier les données du disque. Calamares guide ensuite les choix de compte,
+de fuseau horaire et de chargeur d’amorçage proposés par l’image.
+
+### Persistance
+
+La persistance live stocke les changements de la session sur une partition
+ext4 dédiée. Identifiez avec soin la partition à utiliser avant d’exécuter :
 
 ```bash
 sudo nonoos-create-persistence /dev/sdX3
 ```
 
-Remplacez `/dev/sdX3` par la partition destinée à la persistance. Cette
-commande formate entièrement la partition en ext4 : vérifiez impérativement
-le périphérique avant de confirmer. Pour une utilisation non interactive,
-l’option destructive doit être explicite :
+Remplacez `/dev/sdX3` par le périphérique réel de la partition dédiée. Le
+script refuse notamment une partition montée et demande une confirmation
+interactive. **Son contenu sera entièrement effacé**, puis la partition sera
+formatée en ext4 avec le label `persistence`. N’utilisez pas une partition
+contenant des données à conserver. En mode non interactif, l’option `--yes`
+confirme explicitement l’effacement. Le démarrage live doit inclure l’option
+`persistence` ; elle figure dans la configuration de démarrage de l’image.
 
-```bash
-sudo nonoos-create-persistence --yes /dev/sdX3
-```
+## Développement et personnalisation
 
-La partition reçoit le label `persistence` et le fichier de configuration
-`/persistence.conf` avec la règle `/ union`. Elle doit être séparée du support
-contenant l’ISO. Le script refuse une partition déjà montée.
+Les principales zones de personnalisation sont :
 
-Pour désactiver la persistance lors d’un démarrage ponctuel, éditez les
-paramètres de démarrage et retirez `persistence`.
+- `rootfs/` pour les fichiers intégrés à l’environnement live, les services,
+  les scripts et les outils NonoOS ;
+- `linux-6.18/` pour la configuration et la compilation du noyau embarqué ;
+- `build-live-iso.sh` pour les étapes de construction et les options de
+  live-build ;
+- `src/` pour les composants complémentaires, dont les outils Rust.
 
-### Configuration initiale
+Après une modification de `rootfs/`, reconstruisez l’image pour l’intégrer à
+l’ISO. Les composants compilés ne sont pas nécessairement copiés depuis leur
+répertoire source directement : le script les construit dans le répertoire de
+travail puis les installe dans le système live.
 
-Au premier démarrage, le système peut proposer une configuration de langue, clavier, environnements et paquets selon le profil choisi. Les scripts de premier boot sont définis dans :
+## Notes de conception
 
-- `rootfs/etc/init.d/first-boot`
-- `rootfs/etc/init.d/every-boot`
+Le dépôt mélange plusieurs catégories de composants :
 
-### Outils présents dans le live système
+- sources du noyau Linux
+- scripts de construction de live system
+- outils de bureau Qt
+- outils système en Bash et Rust
+- composants de sécurité et maintenance
 
-- `nonoos-software-center` : gestion des logiciels / mises à jour
-- `nonoos-security-center` : interface de sécurité
-- `nonoos-startup-manager` : gestion des éléments au démarrage
-- `nonoos-security` : surveillance / sécurité système
-- `nonoos-firewall` : configuration de UFW
-- `nonoos-dashboard` : tableau de bord système
-- `nonoos-create-test-user` : création d’un compte de test
-- `nonoos-test-shell` : vérification de l’environnement shell
+Cela permet de produire un système d’exploitation complet et personnalisable, tout en restant compatible avec la base Debian standard.
 
-### Détection des systèmes installés
+## Licence
 
-Le module C++ `rootfs/usr/migration-assistant/detector.hpp` expose
-`detect_installed_os()`. Il inspecte les partitions Linux, LVM et chiffrées
-déjà déverrouillées, monte celles qui ne sont pas déjà montées en lecture seule,
-et reconnaît les installations Linux (`os-release`), Windows et macOS. Le
-résultat fournit les systèmes trouvés ainsi que les erreurs de partitions qui
-n’ont pas pu être inspectées. L’inventaire et le montage nécessitent les outils
-`lsblk` et les privilèges root ; les volumes chiffrés doivent être déverrouillés
-au préalable.
-
-Après la création du compte principal, le premier démarrage propose aussi de
-récupérer `Documents`, `Images`, `Videos`, `Music`, `Desktop` et `Downloads`
-depuis une installation contenant un dossier `/home`. La source est montée en
-lecture seule lorsqu’elle ne l’est pas déjà, les fichiers existants ne sont pas
-écrasés et les erreurs sont consignées dans
-`/var/log/newdistrib-migration.log`. Cette étape peut être annulée sans bloquer
-la suite de la configuration.
-
-## Personnalisation
-
-Le projet est conçu pour être facilement adapté :
-
-- ajouter des paquets dans `build-live-iso.sh` sous `config/package-lists/`,
-- modifier le contenu du système dans `rootfs/`,
-- personnaliser le noyau avec les options de `make` et `scripts/config`,
-- ajouter des hooks live via `config/hooks/live/`.
-
-## Notes de développement
-
-Le dépôt mélange plusieurs niveaux de conception :
-
-- sources du noyau Linux officiel,
-- scripts de génération de live system,
-- composants graphiques Qt,
-- outils de sécurité écrits en Rust et Bash.
-
-Cette structure permet de construire un système d’exploitation complet et personnalisable, tout en conservant la base Linux standard et ses outils de maintenance.
-
-## Remarques
-
-Ce projet est un environnement expérimental de distribution Linux. Il est destiné à la conception, le test et l’adaptation de systèmes live personnalisés. Les sources du noyau restent celles de Linux et doivent être utilisées dans le respect de leurs licences et de leur documentation officielle.
+Ce dépôt ne déclare pas de licence spécifique dans son état actuel. Si vous l’utilisez ou le redistribuez, vérifiez la licence des composants tiers et adaptez la documentation en fonction de votre usage.

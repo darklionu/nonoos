@@ -1,10 +1,57 @@
 #include "detector.hpp"
+#include "extension_filter.hpp"
 #include "extensions.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
+
+namespace {
+
+std::string normalize_extension(std::string extension)
+{
+    if (extension.empty()) {
+        return {};
+    }
+
+    if (extension.front() != '.') {
+        extension.insert(extension.begin(), '.');
+    }
+
+    std::transform(
+        extension.begin(),
+        extension.end(),
+        extension.begin(),
+        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+
+    return extension;
+}
+
+} // namespace
+
+bool has_allowed_extension(
+    const std::filesystem::path& file,
+    const std::vector<std::string>& extensions)
+{
+    if (extensions.empty()) {
+        return true;
+    }
+
+    const auto file_extension = normalize_extension(file.extension().string());
+    if (file_extension.empty()) {
+        return false;
+    }
+
+    for (const auto& candidate : extensions) {
+        if (normalize_extension(candidate) == file_extension) {
+            return true;
+        }
+    }
+    return false;
+}
 
 int main()
 {

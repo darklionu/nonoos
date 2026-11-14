@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Profils utilisateur NonoOS
+Comment=Consulter ou modifier votre profil personnel
+Exec=/usr/local/bin/nonoos-profile
+Icon=user-identity
+Terminal=true
+Categories=Settings;System;
+StartupNotify=false

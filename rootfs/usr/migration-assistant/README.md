@@ -89,14 +89,17 @@ symboliques et ne retourne que les fichiers ordinaires ; il ne copie, ne
 supprime et ne modifie aucun fichier. Les résultats peuvent être volumineux
 pour une partition entière.
 
-Le programme doit être compilé avec `detector.cpp` et le standard C++17 ou plus
-récent. Depuis la racine du dépôt, une vérification minimale de compilation est
-possible avec :
+Le programme doit être compilé avec le module de détection et les utilitaires
+associés, en C++17 ou plus récent. Depuis la racine du dépôt, une vérification
+minimale de compilation est possible avec :
 
 ```sh
-g++ -std=c++17 -Wall -Wextra -pedantic -fsyntax-only \
+g++ -std=c++17 -Wall -Wextra -pedantic \
   "rootfs/usr/migration-assistant/detector.cpp" \
-  "rootfs/usr/migration-assistant/extension_filter.cpp"
+  "rootfs/usr/migration-assistant/extension.cpp" \
+  "rootfs/usr/migration-assistant/extengest.cpp" \
+  "rootfs/usr/migration-assistant/extension_filter.cpp" \
+  -o /tmp/migration-filter
 ```
 
 `lsblk` doit être disponible. Les montages temporaires nécessitent les

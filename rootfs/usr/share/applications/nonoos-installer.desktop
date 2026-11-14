@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Installer NonoOS
+Name[fr]=Installer NonoOS
+Comment=Installer NonoOS sur un disque
+Comment[fr]=Installer NonoOS sur un disque
+Exec=calamares
+Icon=drive-harddisk
+Terminal=false
+Type=Application
+Categories=System;Settings;
+Keywords=installer;installation;disque;calamares;
+StartupNotify=true
