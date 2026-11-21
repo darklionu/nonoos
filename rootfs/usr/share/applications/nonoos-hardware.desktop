@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Détection du matériel NonoOS
+Comment=Afficher automatiquement les composants détectés sur cet ordinateur
+Exec=konsole -e /usr/local/bin/nonoos-hardware
+Icon=computer
+Terminal=false
+Categories=System;HardwareSettings;
+StartupNotify=false

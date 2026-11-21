@@ -138,6 +138,10 @@ progress 1 "Préparation de l'environnement de construction"
 mkdir -p "$BUILD_DIR"
 
 progress 2 "Compilation des outils personnalisés"
+gcc -std=c11 -Wall -Wextra -pedantic \
+    "$PROJECT_DIR/src/nonoos-recovery-hotkey.c" \
+    -o "$BUILD_DIR/nonoos-recovery-hotkey-listen"
+
 g++ -std=c++17 -Wall -Wextra -pedantic \
     "$PROJECT_DIR/rootfs/update-center/interface_graphique.cpp" \
     $(pkg-config --cflags --libs Qt6Widgets) \
@@ -154,7 +158,7 @@ g++ -std=c++17 -Wall -Wextra -pedantic \
     -o "$BUILD_DIR/nonoos-startup-manager"
 
 g++ -std=c++17 -Wall -Wextra -pedantic \
-    "$PROJECT_DIR/rootfs/gestion-alllimentations/power-gui.cpp" \
+    "$PROJECT_DIR/rootfs/gestion-alimentations/power-gui.cpp" \
     $(pkg-config --cflags --libs Qt6Widgets) \
     -o "$BUILD_DIR/nonoos-power-gui"
 
@@ -315,6 +319,8 @@ qt6-qpa-plugins
 python3
 procps
 iproute2
+pciutils
+usbutils
 flatpak
 power-profiles-daemon
 ufw
@@ -356,13 +362,20 @@ if [[ "$TARGET_ARCH" == "amd64" ]]; then
 fi
 
 progress 6 "Installation des fichiers NonoOS dans l'image"
-cp -a "$PROJECT_DIR/rootfs/." config/includes.chroot/
+cp -a --no-preserve=ownership "$PROJECT_DIR/rootfs/." config/includes.chroot/
+chown -R root:root config/includes.chroot
+find config/includes.chroot -xdev -type d -exec chmod 0755 {} +
+find config/includes.chroot -xdev -type f -perm /111 -exec chmod 0755 {} +
+find config/includes.chroot -xdev -type f ! -perm /111 -exec chmod 0644 {} +
+find config/includes.chroot -xdev -type f -exec chmod u-s,g-s {} +
 install -D -m 0755 "$BUILD_DIR/nonoos-software-center" \
     config/includes.chroot/usr/bin/nonoos-software-center
 install -D -m 0755 "$BUILD_DIR/nonoos-security-center" \
     config/includes.chroot/usr/bin/nonoos-security-center
 install -D -m 0755 "$BUILD_DIR/nonoos-startup-manager" \
     config/includes.chroot/usr/bin/nonoos-startup-manager
+install -D -m 0755 "$BUILD_DIR/nonoos-recovery-hotkey-listen" \
+    config/includes.chroot/usr/local/bin/nonoos-recovery-hotkey-listen
 install -D -m 0755 "$BUILD_DIR/nonoos-power-gui" \
     config/includes.chroot/usr/bin/nonoos-power-gui
 install -D -m 0755 "$BUILD_DIR/nonoos-security" \
@@ -373,7 +386,7 @@ install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_newuser.sh" \
     config/includes.chroot/usr/local/bin/nonoos-create-test-user
 install -D -m 0755 "$PROJECT_DIR/rootfs/etc/new commande/commande_testshell.sh" \
     config/includes.chroot/usr/local/bin/nonoos-test-shell
-install -D -m 0755 "$PROJECT_DIR/rootfs/gestion-alllimentations/nonoos-power" \
+install -D -m 0755 "$PROJECT_DIR/rootfs/gestion-alimentations/nonoos-power" \
     config/includes.chroot/usr/local/bin/nonoos-power
 install -D -m 0755 "$PROJECT_DIR/rootfs/gestionnaire de sécurité/s" \
     config/includes.chroot/usr/local/bin/nonoos-firewall
@@ -410,6 +423,8 @@ chmod 0755 config/hooks/0000-nonoos-network.chroot_early
 mkdir -p config/includes.chroot/etc/systemd/system/multi-user.target.wants
 ln -sfn ../newdistrib-first-boot.service \
     config/includes.chroot/etc/systemd/system/multi-user.target.wants/newdistrib-first-boot.service
+ln -sfn ../nonoos-recovery-hotkey.service \
+    config/includes.chroot/etc/systemd/system/multi-user.target.wants/nonoos-recovery-hotkey.service
 ln -sfn ../newdistrib-every-boot.service \
     config/includes.chroot/etc/systemd/system/multi-user.target.wants/newdistrib-every-boot.service
 

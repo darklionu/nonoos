@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export LC_ALL=C
+
+read_value() {
+    local path="$1"
+    local value="$2"
+    if [[ -r "$path" ]]; then
+        IFS= read -r value < "$path" || true
+    fi
+    printf '%s' "$value"
+}
+
+cpu_model=$(
+    awk -F: '
+        /^model name[[:space:]]*:/ || /^Hardware[[:space:]]*:/ ||
+        /^Processor[[:space:]]*:/ {
+            sub(/^[[:space:]]+/, "", $2)
+            if ($2 != "") {
+                print $2
+                exit
+            }
+        }
+    ' /proc/cpuinfo 2>/dev/null || true
+)
+cpu_model=${cpu_model:-Non détecté}
+cpu_count=$(awk '/^processor[[:space:]]*:/ {count++} END {print count + 0}' /proc/cpuinfo)
+
+memory=$(
+    awk '/^MemTotal:/ {
+        printf "%.1f Gio", $2 / 1048576
+        found = 1
+        exit
+    } END {
+        if (!found) print "Non détectée"
+    }' /proc/meminfo
+)
+
+machine=$(read_value /sys/class/dmi/id/product_name "Non détecté")
+if [[ "$machine" == "Non détecté" && -r /sys/firmware/devicetree/base/model ]]; then
+    machine=$(tr -d '\000' < /sys/firmware/devicetree/base/model)
+    machine=${machine:-Non détecté}
+fi
+
+graphics=""
+if command -v lspci >/dev/null 2>&1; then
+    graphics=$(lspci -nn 2>/dev/null |
+        awk '/VGA compatible controller|3D controller|Display controller/ {sub(/^[^:]*: /, ""); print}')
+fi
+if [[ -z "$graphics" ]]; then
+    for device in /sys/class/drm/card[0-9]*; do
+        [[ -e "$device" ]] || continue
+        pci_device="${device##*/}"
+        if [[ -r "$device/device/vendor" && -r "$device/device/device" ]]; then
+            vendor=$(read_value "$device/device/vendor" "inconnu")
+            device_id=$(read_value "$device/device/device" "inconnu")
+            graphics+="${graphics:+$'\n'}${pci_device} (PCI ${vendor}:${device_id})"
+        fi
+    done
+fi
+graphics=${graphics:-Aucun périphérique graphique identifié}
+
+storage=""
+if command -v lsblk >/dev/null 2>&1; then
+    storage=$(lsblk -dn -o NAME,SIZE,TYPE 2>/dev/null |
+        awk '$3 == "disk" && $1 !~ /boot[0-9]+$/ {print $1 " — " $2}')
+fi
+storage=${storage:-Aucun disque détecté}
+
+network=""
+for interface in /sys/class/net/*; do
+    [[ -e "$interface/device" ]] || continue
+    network+="${network:+, }${interface##*/}"
+done
+network=${network:-Aucune interface réseau physique détectée}
+
+usb=""
+if command -v lsusb >/dev/null 2>&1; then
+    usb=$(lsusb 2>/dev/null | sed 's/^Bus [0-9][0-9]* Device [0-9][0-9]*: //')
+else
+    for device in /sys/bus/usb/devices/*; do
+        [[ -r "$device/idVendor" ]] || continue
+        vendor=$(read_value "$device/idVendor" "????")
+        product_id=$(read_value "$device/idProduct" "????")
+        product=$(read_value "$device/product" "Périphérique USB")
+        usb+="${usb:+$'\n'}${product} (USB ${vendor}:${product_id})"
+    done
+fi
+usb=${usb:-Aucun périphérique USB détecté}
+
+cat <<REPORT
+Inventaire matériel NonoOS
+==========================
+Modèle : $machine
+Architecture : $(uname -m)
+Processeur : $cpu_model ($cpu_count cœur(s) logique(s))
+Mémoire vive : $memory
+
+Graphique :
+$graphics
+
+Stockage :
+$storage
+
+Réseau :
+$network
+
+USB :
+$usb
+REPORT

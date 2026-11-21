@@ -12,10 +12,10 @@ système de fichiers de l’ISO.
 | --- | --- |
 | `etc/` | Configuration du système, scripts de premier démarrage, services systemd, profils KDE et scripts d’administration. |
 | `apps/` | Sources des applications NonoOS, dont le gestionnaire de démarrage. |
-| `usr/local/bin/` | Commandes installées directement depuis `rootfs/`, dont le gestionnaire de profil utilisateur. |
+| `usr/local/bin/` | Commandes installées directement depuis `rootfs/`, dont le gestionnaire de profil utilisateur et l’inventaire matériel. |
 | `update-center/` | Source de l’interface de logiciels et mises à jour. |
 | `gestionnaire de sécurité/` | Source et fichiers du centre de sécurité. |
-| `gestion-alllimentations/` | Interface graphique et commande de gestion de l’alimentation. |
+| `gestion-alimentations/` | Interface graphique et commande de gestion de l’alimentation. |
 | `nonoos-info/` | Sources du tableau de bord et des informations système. |
 | `usr/src/ia/` | Sources et documentation de l’assistant ChatIA. |
 | `usr/src/USB/` | Composants liés au diagnostic et aux périphériques USB. |
@@ -57,6 +57,22 @@ Le profil personnel est distinct des profils de logiciels sélectionnés au
 premier démarrage : il ne modifie ni les privilèges du compte ni les paquets
 installés. La valeur est réservée aux préférences et outils propres à chaque
 utilisateur.
+
+## Inventaire matériel
+
+L’application **Détection du matériel NonoOS**, accessible depuis le menu du
+bureau, affiche le modèle, l’architecture, le processeur, la mémoire, les
+composants graphiques, les disques, les interfaces réseau et les périphériques
+USB détectés. Le même inventaire est présenté pendant la configuration du
+premier démarrage. Les commandes `lspci` et `lsusb` enrichissent les noms
+affichés ; les informations disponibles dans `/proc` et `/sys` servent de
+repli.
+
+Depuis un terminal, vous pouvez également lancer :
+
+```bash
+nonoos-hardware
+```
 
 ## Documentation des composants
 

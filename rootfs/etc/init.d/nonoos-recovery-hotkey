@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+LOG_FILE=/var/log/nonoos-recovery-hotkey.log
+LISTENER=/usr/local/bin/nonoos-recovery-hotkey-listen
+MIGRATION_ASSISTANT=/usr/local/sbin/nonoos-migration-assistant
+
+log() {
+    printf '[%s] %s\n' "$(date '+%F %T')" "$*" >> "$LOG_FILE"
+}
+
+if [[ "$(id -u)" -ne 0 ]]; then
+    echo "Ce service doit être exécuté en root." >&2
+    exit 1
+fi
+
+if [[ ! -x "$LISTENER" ]]; then
+    echo "Écouteur de raccourci introuvable ou non exécutable : $LISTENER" >&2
+    exit 1
+fi
+if [[ ! -x "$MIGRATION_ASSISTANT" ]]; then
+    echo "Assistant de récupération introuvable ou non exécutable : $MIGRATION_ASSISTANT" >&2
+    exit 1
+fi
+
+printf '\nAppuyez sur Ctrl+Alt+7 dans les 5 secondes pour ouvrir l’assistant de récupération.\n'
+if "$LISTENER" --timeout-seconds 5; then
+    log "Raccourci Ctrl+Alt+7 détecté."
+else
+    listener_status=$?
+    if [[ "$listener_status" -eq 1 ]]; then
+        log "Aucun raccourci de récupération détecté."
+        exit 0
+    fi
+    log "Écoute du raccourci impossible (code $listener_status)."
+    exit 1
+fi
+
+if ! command -v whiptail >/dev/null 2>&1; then
+    echo "whiptail est requis pour choisir le compte de destination." >&2
+    log "whiptail est introuvable."
+    exit 1
+fi
+
+if ! passwd_entries=$(getent passwd); then
+    echo "Impossible de lire la liste des comptes utilisateur." >&2
+    log "getent passwd a échoué."
+    exit 1
+fi
+
+users=()
+menu=()
+while IFS=: read -r username _ uid _ _ home shell; do
+    [[ "$uid" =~ ^[0-9]+$ ]] || continue
+    ((uid >= 1000 && uid < 65534)) || continue
+    [[ "$shell" != */nologin && "$shell" != */false ]] || continue
+    [[ -d "$home" ]] || continue
+    users+=("$username")
+    menu+=("$username" "$home")
+done <<< "$passwd_entries"
+
+if ((${#users[@]} == 0)); then
+    echo "Aucun compte utilisateur avec un dossier personnel n’a été trouvé." >&2
+    log "Aucun compte utilisateur valide trouvé."
+    exit 1
+fi
+
+if ! selected_user=$(whiptail --title "Assistant de récupération" \
+    --menu "Choisissez le compte de destination :" 15 72 6 \
+    "${menu[@]}" 3>&1 1>&2 2>&3); then
+    log "Sélection du compte annulée."
+    exit 0
+fi
+
+if "$MIGRATION_ASSISTANT" "$selected_user"; then
+    log "Récupération terminée pour $selected_user."
+else
+    assistant_status=$?
+    if [[ "$assistant_status" -eq 2 ]]; then
+        log "Assistant de récupération annulé ou aucune source sélectionnée."
+        exit 0
+    fi
+    log "Échec de l’assistant de récupération pour $selected_user (code $assistant_status)."
+    exit "$assistant_status"
+fi

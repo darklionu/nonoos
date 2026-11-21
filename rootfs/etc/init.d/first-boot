@@ -366,78 +366,9 @@ ui_welcome() {
     esac
 }
 
-# Détecte le matériel courant à partir de procfs, sysfs et des outils disponibles.
+# Génère l'inventaire matériel partagé avec l'outil accessible depuis le bureau.
 detect_hardware() {
-    local cpu ram_kib ram_mib machine gpu disks networks usb_device usb_product usb_count usb_list
-    local device pci_device vendor pci_id
-
-    cpu=$(awk -F: '/^model name[[:space:]]*:/ {sub(/^[[:space:]]+/, "", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null)
-    [ -n "$cpu" ] || cpu="Non détecté"
-
-    ram_kib=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null)
-    if [[ "$ram_kib" =~ ^[0-9]+$ ]]; then
-        ram_mib=$((ram_kib / 1024))
-        ram_mib="$ram_mib Mio"
-    else
-        ram_mib="Non détectée"
-    fi
-
-    machine="Non détecté"
-    if [ -r /sys/class/dmi/id/product_name ]; then
-        IFS= read -r machine < /sys/class/dmi/id/product_name || machine="Non détecté"
-        [ -n "$machine" ] || machine="Non détecté"
-    fi
-
-    if command -v lspci >/dev/null 2>&1; then
-        gpu=$(lspci 2>/dev/null | awk '/VGA compatible controller|3D controller|Display controller/ {sub(/^[^:]*: /, ""); print}' | head -n 3)
-    else
-        gpu=""
-        for device in /sys/class/drm/card[0-9]*; do
-            [ -e "$device" ] || continue
-            pci_device="${device##*/}"
-            if [ -r "$device/device/vendor" ] && [ -r "$device/device/device" ]; then
-                IFS= read -r vendor < "$device/device/vendor" || vendor="unknown"
-                IFS= read -r pci_id < "$device/device/device" || pci_id="unknown"
-                gpu="${gpu}${gpu:+; }${pci_device} (PCI ${vendor}:${pci_id})"
-            fi
-        done
-    fi
-    [ -n "$gpu" ] || gpu="Aucun périphérique graphique détecté"
-
-    if command -v lsblk >/dev/null 2>&1; then
-        disks=$(lsblk -dn -o NAME,SIZE,TYPE 2>/dev/null | awk '$3 == "disk" && $1 !~ /boot[0-9]+$/ { print $1 " " $2 }')
-    else
-        disks=""
-    fi
-    [ -n "$disks" ] || disks="Aucun disque détecté"
-
-    networks=""
-    for device in /sys/class/net/*; do
-        [ -e "$device/device" ] || continue
-        networks="${networks}${networks:+, }${device##*/}"
-    done
-    [ -n "$networks" ] || networks="Aucune interface détectée"
-
-    usb_count=0
-    usb_list=""
-    for usb_device in /sys/bus/usb/devices/*; do
-        [ -r "$usb_device/idVendor" ] || continue
-        usb_count=$((usb_count + 1))
-        if [ "$usb_count" -le 8 ]; then
-            usb_product=""
-            if [ -r "$usb_device/product" ]; then
-                IFS= read -r usb_product < "$usb_device/product" || usb_product=""
-            fi
-            usb_list="${usb_list}${usb_list:+, }${usb_product:-Périphérique USB}"
-        fi
-    done
-    if [ "$usb_count" -gt 8 ]; then
-        usb_list="${usb_list}, et $((usb_count - 8)) autre(s)"
-    fi
-    [ -n "$usb_list" ] || usb_list="Aucun périphérique USB détecté"
-
-    HARDWARE_REPORT=$(printf 'Modèle : %s\nArchitecture : %s\nProcesseur : %s\nMémoire vive : %s\nGraphique : %s\nDisques : %s\nInterfaces réseau : %s\nUSB (%s) : %s' \
-        "$machine" "$(uname -m)" "$cpu" "$ram_mib" "$gpu" "$disks" "$networks" "$usb_count" "$usb_list")
+    HARDWARE_REPORT=$(/usr/local/bin/nonoos-hardware)
     log "Rapport matériel détecté : $(printf '%s' "$HARDWARE_REPORT" | tr '\n' ';')"
 }
 
@@ -652,11 +583,7 @@ ask_user_account() {
         # Pour un compte sudo supplémentaire, il faut entrer un mot de passe de validation.
         USER_PASSWORD=$(prompt_password_with_confirmation "Définissez le mot de passe du compte sudo")
     else
-        USER_PASSWORD=$(ui_password "$TITLE" "Définissez le mot de passe de l’utilisateur")
-        if [ -z "$USER_PASSWORD" ]; then
-            USER_PASSWORD="nono"
-            log "Avertissement : mot de passe vide, utilisation de la valeur par défaut 'nono' pour le compte $USER_NAME"
-        fi
+        USER_PASSWORD=$(prompt_password_with_confirmation "Définissez le mot de passe de l’utilisateur")
     fi
 }
 
@@ -664,7 +591,6 @@ ask_user_account() {
 # - crée le compte si nécessaire
 # - définit le mot de passe
 # - ajoute l'utilisateur au groupe sudo si le mode le demande
-# - écrit une règle sudo dédiée dans /etc/sudoers.d/
 create_user_account() {
     local username="${1:-}"
     local pass="${2:-}"
@@ -672,6 +598,10 @@ create_user_account() {
 
     if [ -z "$username" ]; then
         log "ERREUR : nom d'utilisateur vide, création du compte impossible."
+        return 1
+    fi
+    if [ -z "$pass" ]; then
+        log "ERREUR : mot de passe vide, création du compte $username impossible."
         return 1
     fi
 
@@ -694,11 +624,9 @@ create_user_account() {
     fi
 
     # Définition du mot de passe avec chpasswd, ce qui est plus fiable qu'un shell interactif.
-    if [ -n "$pass" ]; then
-        if ! printf '%s:%s\n' "$username" "$pass" | chpasswd; then
-            log "Impossible de définir le mot de passe du compte $username."
-            return 1
-        fi
+    if ! printf '%s:%s\n' "$username" "$pass" | chpasswd; then
+        log "Impossible de définir le mot de passe du compte $username."
+        return 1
     fi
 
     # Gestion des privilèges sudo
@@ -717,18 +645,6 @@ create_user_account() {
         fi
         if ! usermod -aG sudo "$username"; then
             log "Impossible d'ajouter $username au groupe sudo."
-            return 1
-        fi
-        if ! mkdir -p "$SUDOERS_DIR"; then
-            log "Impossible de créer le dossier $SUDOERS_DIR."
-            return 1
-        fi
-        if ! printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$username" > "$SUDOERS_DIR/newdistrib-user"; then
-            log "Impossible d'écrire la règle sudo pour $username."
-            return 1
-        fi
-        if ! chmod 0440 "$SUDOERS_DIR/newdistrib-user"; then
-            log "Impossible de régler les permissions de la règle sudo."
             return 1
         fi
         log "Droits sudo accordés à $username"
